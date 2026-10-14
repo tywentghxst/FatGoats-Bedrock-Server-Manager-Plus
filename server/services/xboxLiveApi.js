@@ -92,7 +92,7 @@ class XboxLiveApi {
     } catch (err) {
       console.warn('[XboxLiveApi] Failed to fetch full profile settings:', err.message);
       return {
-        gamertag: 'Xbox User',
+        gamertag: 'The FatGoats595',
         displayPic: '',
         gamerscore: '0',
         xuid,

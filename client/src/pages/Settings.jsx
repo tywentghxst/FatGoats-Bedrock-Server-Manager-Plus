@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import api from '../api';
 import { useAuth } from '../context/AuthContext';
-import UpdateProgressBar from '../components/UpdateProgressBar';
 
 export const Settings = () => {
   const { user, updateCredentials, isAdmin } = useAuth();
@@ -33,7 +32,11 @@ export const Settings = () => {
   const [checkingUpdates, setCheckingUpdates] = useState(false);
   const [updatingApp, setUpdatingApp] = useState(false);
   const [autoCheckAppUpdates, setAutoCheckAppUpdates] = useState(true);
-  const [liveUpdateProgress, setLiveUpdateProgress] = useState(null);
+  const [updateProgressData, setUpdateProgressData] = useState({
+    percent: 10,
+    stage: 1,
+    progress: 'Preparing application update environment...',
+  });
   const updatePollRef = useRef(null);
 
   // Active Settings Tab ('portal' | 'automation' | 'admin' | 'updates' | 'all')
@@ -259,35 +262,37 @@ export const Settings = () => {
     }
   };
 
-  // Poll update progress when updatingApp is true
-  useEffect(() => {
-    if (updatingApp) {
-      updatePollRef.current = setInterval(async () => {
-        try {
-          const p = await api.Updates.getProgress();
-          if (p) setLiveUpdateProgress(p);
-        } catch (_) {}
-      }, 500);
-    } else {
-      if (updatePollRef.current) clearInterval(updatePollRef.current);
-    }
-    return () => {
-      if (updatePollRef.current) clearInterval(updatePollRef.current);
-    };
-  }, [updatingApp]);
-
   const handleApplyAppUpdate = async () => {
     if (!window.confirm('Apply latest updates from GitHub? All worlds, databases, player data, and configurations are 100% preserved.')) return;
     setUpdatingApp(true);
-    setLiveUpdateProgress({
+    setUpdateProgressData({
+      percent: 15,
       stage: 1,
-      progressPercent: 12,
-      stageName: 'Initializing update',
-      details: 'Connecting to update engine...',
+      progress: 'Creating safety backup of database...',
     });
+
+    if (updatePollRef.current) clearInterval(updatePollRef.current);
+    updatePollRef.current = setInterval(async () => {
+      try {
+        const p = await api.Updates.getProgress();
+        if (p) {
+          setUpdateProgressData((prev) => ({
+            percent: Math.max(prev.percent, p.percent || 10),
+            stage: p.stage || prev.stage || 1,
+            progress: p.progress || prev.progress,
+          }));
+        }
+      } catch (_) {}
+    }, 600);
 
     try {
       const res = await api.Updates.apply();
+      if (updatePollRef.current) clearInterval(updatePollRef.current);
+      setUpdateProgressData({
+        percent: 100,
+        stage: 5,
+        progress: 'App successfully updated to latest version!',
+      });
       setCredToast({
         type: 'success',
         text: `✓ ${res.message || 'App successfully updated!'} Please reload the page to load new assets.`,
@@ -295,6 +300,7 @@ export const Settings = () => {
       const fresh = await api.Updates.getStatus(false);
       setUpdateStatus(fresh);
     } catch (err) {
+      if (updatePollRef.current) clearInterval(updatePollRef.current);
       setCredToast({ type: 'error', text: err.message || 'Failed to apply app update.' });
     } finally {
       setUpdatingApp(false);
@@ -1146,21 +1152,61 @@ export const Settings = () => {
                       </div>
                     )}
 
-                    {/* Live Progress Bar during active update */}
+                    {/* Real-time Update Progress Bar */}
                     {updatingApp && (
-                      <div className="p-4 rounded-xl mb-4" style={{ background: 'rgba(15, 23, 42, 0.7)', border: '1px solid rgba(6, 182, 212, 0.3)' }}>
-                        <UpdateProgressBar progress={liveUpdateProgress} />
+                      <div className="update-progress-container mb-4">
+                        <div className="update-progress-header">
+                          <div>
+                            <span className="text-xs uppercase font-bold text-sub d-block">Applying Update</span>
+                            <strong className="text-white text-sm">Automated Pipeline in Progress</strong>
+                          </div>
+                          <span className="update-progress-percentage">{updateProgressData.percent}%</span>
+                        </div>
+
+                        <div className="update-progress-track">
+                          <div
+                            className="update-progress-fill"
+                            style={{ width: `${updateProgressData.percent}%` }}
+                          />
+                        </div>
+
+                        <div className="update-steps-stepper">
+                          {[
+                            { num: 1, label: 'Safety Backup', icon: '🛡️' },
+                            { num: 2, label: 'Pull Commits', icon: '📥' },
+                            { num: 3, label: 'Dependencies', icon: '📦' },
+                            { num: 4, label: 'Build Client', icon: '⚡' },
+                            { num: 5, label: 'Launcher Binary', icon: '🪟' },
+                          ].map((s) => {
+                            const isDone = updateProgressData.stage > s.num;
+                            const isActive = updateProgressData.stage === s.num;
+                            return (
+                              <div
+                                key={s.num}
+                                className={`update-step-pill ${isActive ? 'is-active' : ''} ${isDone ? 'is-done' : ''}`}
+                              >
+                                <span>{isDone ? '✓' : s.icon}</span>
+                                <span className="truncate">{s.label}</span>
+                              </div>
+                            );
+                          })}
+                        </div>
+
+                        <div className="update-status-live-line">
+                          <span className="update-status-dot" />
+                          <span className="truncate flex-1">{updateProgressData.progress}</span>
+                        </div>
                       </div>
                     )}
 
                     <div className="d-flex items-center justify-between flex-wrap gap-3">
                       <button
                         type="button"
-                        className="btn btn-primary font-bold px-5 py-2.5"
+                        className="btn btn-primary font-bold px-4 py-2"
                         onClick={handleApplyAppUpdate}
                         disabled={updatingApp || !isAdmin}
                       >
-                        {updatingApp ? 'Applying Update...' : '🚀 Update App Now (Zero Data Loss)'}
+                        {updatingApp ? 'Applying Update (zero data loss)...' : '🚀 Update App Now (Zero Data Loss)'}
                       </button>
 
                       {updateStatus.isIgnored && (

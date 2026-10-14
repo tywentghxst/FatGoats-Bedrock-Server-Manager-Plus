@@ -24,7 +24,7 @@ router.get('/status', async (req, res) => {
 
 /**
  * GET /progress
- * Retrieve real-time multi-stage update progress.
+ * Poll ongoing update progress and percentage.
  */
 router.get('/progress', (req, res) => {
   return res.json(appUpdateService.getProgress());

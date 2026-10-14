@@ -216,10 +216,10 @@ export const Tunnel = {
 
 export const Updates = {
   getStatus: (forceFetch = false) => request('GET', `/api/updates/status${forceFetch ? '?fetch=true' : ''}`),
+  getProgress: () => request('GET', '/api/updates/progress'),
   check: () => request('POST', '/api/updates/check'),
   setPreferences: (prefs) => request('POST', '/api/updates/preferences', prefs),
   apply: () => request('POST', '/api/updates/apply'),
-  getProgress: () => request('GET', '/api/updates/progress'),
 };
 
 const api = {

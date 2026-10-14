@@ -69,7 +69,7 @@ class PlayitService extends EventEmitter {
 
   getConfig() {
     return {
-      autoStart: db.getSetting('tunnel_auto_start', 'false') === 'true',
+      autoStart: db.getSetting('tunnel_auto_start', 'true') === 'true',
       targetPort: parseInt(db.getSetting('tunnel_target_port', '19132'), 10) || 19132,
       targetIp: db.getSetting('tunnel_target_ip', '127.0.0.1'),
       showInPortal: db.getSetting('portal_show_tunnel', 'true') === 'true',

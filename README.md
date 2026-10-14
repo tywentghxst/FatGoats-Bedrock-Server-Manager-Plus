@@ -79,21 +79,15 @@ bedrock-server-manager/
 
 ---
 
-## 🛠️ Quick Start (Fresh Download from GitHub)
+## 🛠️ Quick Commands
 
-### Option 1 (Recommended - Native Windows App):
-1. Double-click `BedrockServerManager.exe` or `start-manager.bat`.
-2. On first run, it automatically checks dependencies and opens your browser at [http://localhost:3001](http://localhost:3001).
-3. The app sits in your Windows Taskbar Overflow Tray with right-click server power controls.
-
-### Option 2 (Manual CLI):
 ```bash
-# Install server dependencies
-npm install
+# Start both backend and frontend concurrently in development mode:
+npm run dev
 
-# Start manager backend (serves pre-built dashboard on http://localhost:3001)
+# Or start backend only (serves built client on http://localhost:3001):
 node server/index.js
 
-# Or development mode with hot reload:
-npm run dev
+# Rebuild frontend:
+npm run build
 ```

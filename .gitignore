@@ -1,8 +1,12 @@
 # Dependencies
+node_modules/
 client/node_modules/
 
+# Production build
+client/dist/
+
 # Bedrock server binaries and world data
-bds/*
+bds/
 !bds/behavior_packs/
 !bds/resource_packs/
 bds/behavior_packs/*
@@ -11,9 +15,8 @@ bds/resource_packs/*
 !bds/resource_packs/.gitkeep
 
 # Local database, uploads, and backups
-data/db/*.db
-data/db/*.db-journal
-data/db/*.bak
+data/db/*
+!data/db/.gitkeep
 data/backups/*
 !data/backups/.gitkeep
 data/uploads/*

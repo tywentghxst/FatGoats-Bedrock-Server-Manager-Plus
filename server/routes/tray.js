@@ -62,7 +62,7 @@ router.post('/action', async (req, res) => {
         if (serverProcess.state !== 'running') {
           await serverProcess.start().catch((e) => console.warn('[TrayAction] start_bds error:', e.message));
         }
-        if (playitService.isClaimed() && !playitService.getStatus().isRunning) {
+        if (!playitService.getStatus().isRunning) {
           await playitService.start().catch((e) => console.warn('[TrayAction] start_playit error:', e.message));
         }
         if (broadcasterService.getStatus().account?.authenticated && broadcasterService.getStatus().state !== 'running') {
@@ -72,9 +72,7 @@ router.post('/action', async (req, res) => {
 
       case 'restart_all':
         await serverProcess.restart().catch((e) => console.warn('[TrayAction] restart_bds error:', e.message));
-        if (playitService.isClaimed()) {
-          await playitService.restart().catch((e) => console.warn('[TrayAction] restart_playit error:', e.message));
-        }
+        await playitService.restart().catch((e) => console.warn('[TrayAction] restart_playit error:', e.message));
         if (broadcasterService.getStatus().account?.authenticated) {
           await broadcasterService.restart().catch((e) => console.warn('[TrayAction] restart_xbox error:', e.message));
         }

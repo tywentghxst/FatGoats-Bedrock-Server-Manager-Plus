@@ -371,16 +371,23 @@ namespace BedrockServerManager.Tray
 
             if (!File.Exists(serverScript))
             {
-                Log("ERROR: Server script not found at " + serverScript);
-                MessageBox.Show("Could not find server entry point:\n" + serverScript, "Bedrock Server Manager", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                return;
+                string errMsg = "Could not find server entry point:\n" + serverScript;
+                Log("ERROR: " + errMsg);
+                throw new FileNotFoundException(errMsg);
             }
 
-            Log("Spawning Node backend: " + nodeExe + " " + serverScript);
+            if (string.IsNullOrEmpty(nodeExe) || !File.Exists(nodeExe))
+            {
+                string errMsg = "Node.js was not detected on this system.\nPlease download and install Node.js from https://nodejs.org";
+                Log("ERROR: " + errMsg);
+                throw new FileNotFoundException(errMsg);
+            }
+
+            Log(string.Format("Spawning Node backend: \"{0}\" \"{1}\" (CWD: {2})", nodeExe, serverScript, appDir));
 
             ProcessStartInfo psi = new ProcessStartInfo();
             psi.FileName = nodeExe;
-            psi.Arguments = "server/index.js";
+            psi.Arguments = "\"" + serverScript + "\"";
             psi.WorkingDirectory = appDir;
             psi.UseShellExecute = false;
             psi.CreateNoWindow = true;
@@ -388,6 +395,13 @@ namespace BedrockServerManager.Tray
             psi.RedirectStandardOutput = true;
             psi.RedirectStandardError = true;
             psi.EnvironmentVariables["NODE_ENV"] = "production";
+
+            string nodeDir = Path.GetDirectoryName(nodeExe);
+            string currentPath = Environment.GetEnvironmentVariable("PATH") ?? "";
+            if (!currentPath.Contains(nodeDir))
+            {
+                psi.EnvironmentVariables["PATH"] = nodeDir + ";" + currentPath;
+            }
 
             nodeProcess = new Process();
             nodeProcess.StartInfo = psi;
@@ -415,6 +429,20 @@ namespace BedrockServerManager.Tray
                     return;
                 }
 
+                if (string.IsNullOrEmpty(nodeExe) || !File.Exists(nodeExe))
+                {
+                    form.ShowError("Node.js was not found on your computer.\nPlease install Node.js from https://nodejs.org and re-run.");
+                    return;
+                }
+
+                string npmExe = FindNpmExecutable(nodeExe);
+                string nodeDir = Path.GetDirectoryName(nodeExe);
+                string pathEnv = Environment.GetEnvironmentVariable("PATH") ?? "";
+                if (!pathEnv.Contains(nodeDir))
+                {
+                    pathEnv = nodeDir + ";" + pathEnv;
+                }
+
                 string nodeModulesDir = Path.Combine(appDir, "node_modules");
                 if (!Directory.Exists(nodeModulesDir))
                 {
@@ -424,7 +452,7 @@ namespace BedrockServerManager.Tray
                     ProcessStartInfo npmPsi = new ProcessStartInfo
                     {
                         FileName = "cmd.exe",
-                        Arguments = "/c npm install --omit=dev --no-audit --no-fund",
+                        Arguments = string.Format("/c \"\"{0}\" install --omit=dev --no-audit --no-fund\"", npmExe),
                         WorkingDirectory = appDir,
                         UseShellExecute = false,
                         CreateNoWindow = true,
@@ -432,6 +460,7 @@ namespace BedrockServerManager.Tray
                         RedirectStandardOutput = true,
                         RedirectStandardError = true
                     };
+                    npmPsi.EnvironmentVariables["PATH"] = pathEnv;
 
                     DateTime npmStart = DateTime.Now;
                     using (Process npmProc = new Process())
@@ -468,6 +497,12 @@ namespace BedrockServerManager.Tray
                             int interpolated = 10 + (int)(Math.Min(1.0, elapsedSec / 32.0) * 52);
                             form.UpdateProgress(interpolated, "Installing Server Dependencies (npm install)...", null, "Step 1 of 3: Node Dependencies");
                         }
+                        npmProc.WaitForExit();
+
+                        if (npmProc.ExitCode != 0 && !Directory.Exists(nodeModulesDir))
+                        {
+                            throw new Exception(string.Format("npm install failed with exit code {0}. Please check your internet connection.", npmProc.ExitCode));
+                        }
                     }
 
                     Log("Server dependencies installed successfully.");
@@ -487,17 +522,19 @@ namespace BedrockServerManager.Tray
                     form.UpdateProgress(65, "Compiling Web Dashboard...", "Building client web assets with Vite...", "Step 2 of 3: Frontend Build");
                     DateTime buildStart = DateTime.Now;
 
+                    string clientDir = Path.Combine(appDir, "client");
                     ProcessStartInfo buildPsi = new ProcessStartInfo
                     {
                         FileName = "cmd.exe",
-                        Arguments = "/c cd client && npm install --no-audit --no-fund && npm run build",
-                        WorkingDirectory = appDir,
+                        Arguments = string.Format("/c \"\"{0}\" run build\"", npmExe),
+                        WorkingDirectory = clientDir,
                         UseShellExecute = false,
                         CreateNoWindow = true,
                         WindowStyle = ProcessWindowStyle.Hidden,
                         RedirectStandardOutput = true,
                         RedirectStandardError = true
                     };
+                    buildPsi.EnvironmentVariables["PATH"] = pathEnv;
 
                     using (Process buildProc = new Process())
                     {
@@ -516,6 +553,7 @@ namespace BedrockServerManager.Tray
                             int interpolated = 65 + (int)(Math.Min(1.0, elapsedSec / 22.0) * 20);
                             form.UpdateProgress(interpolated, "Compiling Web Dashboard...", null, "Step 2 of 3: Frontend Build");
                         }
+                        buildProc.WaitForExit();
                     }
 
                     form.UpdateProgress(85, "Dashboard Built Successfully", "✓ Production web assets compiled.", "Step 2 of 3 Complete");
@@ -558,23 +596,114 @@ namespace BedrockServerManager.Tray
 
         private string FindNodeExecutable()
         {
-            string[] searchPaths = new string[]
+            // 1. Direct standard installation paths
+            string[] standardPaths = new string[]
             {
                 @"C:\Program Files\nodejs\node.exe",
                 @"C:\Program Files (x86)\nodejs\node.exe",
                 Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), @"Programs\node\node.exe"),
-                "node.exe"
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), @"nvm\current\node.exe"),
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), @"npm\node.exe"),
+                @"C:\ProgramData\chocolatey\bin\node.exe",
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), @"scoop\apps\nodejs\current\node.exe"),
+                Path.Combine(appDir, "node.exe")
             };
 
-            foreach (string p in searchPaths)
+            foreach (string p in standardPaths)
             {
-                if (p == "node.exe" || File.Exists(p))
+                try
                 {
-                    return p;
+                    if (File.Exists(p)) return p;
                 }
+                catch { }
             }
 
-            return "node";
+            // 2. Scan every directory listed in system & user %PATH%
+            string pathEnv = Environment.GetEnvironmentVariable("PATH") ?? "";
+            string[] pathDirs = pathEnv.Split(new char[] { Path.PathSeparator }, StringSplitOptions.RemoveEmptyEntries);
+            foreach (string dir in pathDirs)
+            {
+                try
+                {
+                    string candidate = Path.Combine(dir.Trim().Trim('"'), "node.exe");
+                    if (File.Exists(candidate)) return candidate;
+                }
+                catch { }
+            }
+
+            // 3. Fallback: ask `cmd.exe /c where node`
+            try
+            {
+                ProcessStartInfo wherePsi = new ProcessStartInfo("cmd.exe", "/c where node")
+                {
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                    RedirectStandardOutput = true
+                };
+                using (Process p = Process.Start(wherePsi))
+                {
+                    string output = p.StandardOutput.ReadToEnd();
+                    p.WaitForExit(3000);
+                    string[] lines = output.Split(new char[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+                    foreach (string line in lines)
+                    {
+                        string trimmed = line.Trim();
+                        if (File.Exists(trimmed) && trimmed.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
+                        {
+                            return trimmed;
+                        }
+                    }
+                }
+            }
+            catch { }
+
+            return null;
+        }
+
+        private string FindNpmExecutable(string nodeExe = null)
+        {
+            if (string.IsNullOrEmpty(nodeExe)) nodeExe = FindNodeExecutable();
+
+            if (!string.IsNullOrEmpty(nodeExe))
+            {
+                string dir = Path.GetDirectoryName(nodeExe);
+                string candidate = Path.Combine(dir, "npm.cmd");
+                if (File.Exists(candidate)) return candidate;
+                candidate = Path.Combine(dir, "npm");
+                if (File.Exists(candidate)) return candidate;
+            }
+
+            // Standard fallback paths
+            string[] standardPaths = new string[]
+            {
+                @"C:\Program Files\nodejs\npm.cmd",
+                @"C:\Program Files (x86)\nodejs\npm.cmd",
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), @"npm\npm.cmd"),
+                @"C:\ProgramData\chocolatey\bin\npm.cmd"
+            };
+
+            foreach (string p in standardPaths)
+            {
+                try
+                {
+                    if (File.Exists(p)) return p;
+                }
+                catch { }
+            }
+
+            // Scan PATH
+            string pathEnv = Environment.GetEnvironmentVariable("PATH") ?? "";
+            foreach (string dir in pathEnv.Split(new char[] { Path.PathSeparator }, StringSplitOptions.RemoveEmptyEntries))
+            {
+                try
+                {
+                    string candidate = Path.Combine(dir.Trim().Trim('"'), "npm.cmd");
+                    if (File.Exists(candidate)) return candidate;
+                }
+                catch { }
+            }
+
+            return "npm.cmd";
         }
 
         private bool IsServerResponding()

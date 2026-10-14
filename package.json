@@ -1,0 +1,30 @@
+{
+  "name": "bedrock-server-manager",
+  "version": "1.0.0",
+  "description": "Minecraft Bedrock Dedicated Server Manager - Full-stack administration panel",
+  "main": "server/index.js",
+  "scripts": {
+    "server": "node server/index.js",
+    "client": "cd client && npm run dev",
+    "dev": "concurrently \"npm run server\" \"npm run client\"",
+    "build": "cd client && npm run build",
+    "build:tray": "cd tray && build.bat",
+    "start": "set NODE_ENV=production && node server/index.js",
+    "setup": "npm install && cd client && npm install && node server/setup.js"
+  },
+  "dependencies": {
+    "archiver": "^7.0.1",
+    "bcryptjs": "^2.4.3",
+    "bedrock-protocol": "^3.60.1",
+    "concurrently": "^9.1.0",
+    "cors": "^2.8.5",
+    "express": "^4.21.1",
+    "jsonwebtoken": "^9.0.2",
+    "multer": "^1.4.5-lts.1",
+    "node-fetch": "^2.7.0",
+    "prismarine-auth": "^3.1.1",
+    "sql.js": "^1.11.0",
+    "unzipper": "^0.12.3",
+    "uuid": "^11.0.0"
+  }
+}

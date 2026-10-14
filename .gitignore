@@ -1,0 +1,55 @@
+# Dependencies
+node_modules/
+client/node_modules/
+
+# Production build
+client/dist/
+
+# Bedrock server binaries and world data
+bds/
+!bds/behavior_packs/
+!bds/resource_packs/
+bds/behavior_packs/*
+bds/resource_packs/*
+!bds/behavior_packs/.gitkeep
+!bds/resource_packs/.gitkeep
+
+# Local database, uploads, and backups
+data/db/*.db
+data/db/*.db-journal
+data/backups/*
+!data/backups/.gitkeep
+data/uploads/*
+!data/uploads/.gitkeep
+data/logs/
+*.log
+*.log.gz
+
+# Auth caches & credentials
+data/auth_cache/
+data/db/auth_cache/
+data/tools/playit/playit.toml
+data/broadcaster/config.yml
+data/broadcaster/cache/
+data/broadcaster/logs/
+
+# Temporary auth & scratch files
+tmp_auth/
+scratch/
+
+# Environment and sensitive tokens
+.env
+.env.local
+.env.*.local
+
+# OS generated files
+Thumbs.db
+[Dd]esktop.ini
+$RECYCLE.BIN/
+.DS_Store
+
+# Editor directories
+.vscode/
+.idea/
+*.suo
+*.user

@@ -9,6 +9,7 @@ using System.Text;
 using System.Windows.Forms;
 using System.Runtime.InteropServices;
 using Microsoft.Win32;
+using System.IO.Compression;
 
 namespace BedrockServerManager.Tray
 {
@@ -147,29 +148,31 @@ namespace BedrockServerManager.Tray
                     DialogResult res = setupForm.ShowDialog();
                     if (res != DialogResult.OK && !IsServerResponding())
                     {
-                        Log("Setup was cancelled or closed by user. Exiting launcher.");
+                        Log("Setup was cancelled or closed by user before completion.");
                         ExitApplication();
                         return;
                     }
                 }
+
+                // Setup verified server online at 100%, open browser dashboard immediately
+                Program.OpenBrowser(Program.DashboardUrl);
             }
             else
             {
                 StartNodeBackend();
+                // Automatically launch browser dashboard on startup once verified online
+                AutoLaunchBrowserOnStartup();
             }
 
             InitializeTimer();
-
-            // Automatically launch browser dashboard on startup
-            AutoLaunchBrowserOnStartup();
 
             // Notify user that app is sitting in taskbar overflow tray
             try
             {
                 notifyIcon.ShowBalloonTip(
-                    3500,
-                    "Bedrock Server Manager",
-                    "Server Manager is running in your taskbar overflow area.\nRight-click for controls or click to open dashboard.",
+                    4500,
+                    "Bedrock Dedicated Server Manager",
+                    "Manager is running in your taskbar overflow tray (click ^ next to clock).\nRight-click for controls or click icon to open dashboard.",
                     ToolTipIcon.Info
                 );
             }
@@ -313,13 +316,13 @@ namespace BedrockServerManager.Tray
 
         private void AutoLaunchBrowserOnStartup()
         {
-            // Run on background thread: wait until server is responsive, then open browser
+            // Run on background thread: wait until server is verified responsive, then open browser
             ThreadPool.QueueUserWorkItem(state =>
             {
                 int attempts = 0;
                 bool ready = false;
 
-                while (attempts < 20 && !ready)
+                while (attempts < 25 && !ready)
                 {
                     ready = IsServerResponding();
                     if (!ready)
@@ -329,19 +332,41 @@ namespace BedrockServerManager.Tray
                     }
                 }
 
-                // Small grace delay to ensure page renders fully
-                Thread.Sleep(300);
-                Program.OpenBrowser(Program.DashboardUrl);
-                Log("Auto-launched browser dashboard on startup.");
+                if (ready)
+                {
+                    // Small grace delay to ensure page renders fully
+                    Thread.Sleep(300);
+                    Program.OpenBrowser(Program.DashboardUrl);
+                    Log("Auto-launched browser dashboard on startup.");
+                }
+                else
+                {
+                    Log("Backend server did not respond within startup timeout. Skipping browser auto-launch to prevent error page.");
+                }
             });
         }
 
         private bool IsSetupRequired()
         {
             if (IsServerResponding()) return false;
+
+            // 1. Is Node.js runtime missing on this computer?
+            string nodeExe = FindNodeExecutable();
+            if (string.IsNullOrEmpty(nodeExe) || !File.Exists(nodeExe)) return true;
+
+            // 2. Are server dependencies missing?
             string nodeModulesDir = Path.Combine(appDir, "node_modules");
+            if (!Directory.Exists(nodeModulesDir)) return true;
+
+            // 3. Is web dashboard build missing?
             string clientIndex = Path.Combine(appDir, "client", "dist", "index.html");
-            return !Directory.Exists(nodeModulesDir) || !File.Exists(clientIndex);
+            if (!File.Exists(clientIndex)) return true;
+
+            // 4. Is the official Bedrock Dedicated Server missing?
+            string bdsExe = Path.Combine(appDir, "bds", "bedrock_server.exe");
+            if (!File.Exists(bdsExe)) return true;
+
+            return false;
         }
 
         private void StartNodeBackend()
@@ -378,7 +403,7 @@ namespace BedrockServerManager.Tray
 
             if (string.IsNullOrEmpty(nodeExe) || !File.Exists(nodeExe))
             {
-                string errMsg = "Node.js was not detected on this system.\nPlease download and install Node.js from https://nodejs.org";
+                string errMsg = "Node.js was not detected on this system.";
                 Log("ERROR: " + errMsg);
                 throw new FileNotFoundException(errMsg);
             }
@@ -414,114 +439,260 @@ namespace BedrockServerManager.Tray
             Log("Node backend process started with PID: " + nodeProcess.Id);
         }
 
+        private void DownloadFileWithProgress(string url, string destinationPath, SetupProgressForm form, int minPercent, int maxPercent, string stepName, string actionName)
+        {
+            ServicePointManager.SecurityProtocol = (SecurityProtocolType)3072 | SecurityProtocolType.Tls;
+            string dir = Path.GetDirectoryName(destinationPath);
+            if (!Directory.Exists(dir)) Directory.CreateDirectory(dir);
+
+            string tempPath = destinationPath + ".downloading";
+            if (File.Exists(tempPath))
+            {
+                try { File.Delete(tempPath); } catch { }
+            }
+
+            using (WebClient wc = new WebClient())
+            {
+                wc.Headers.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
+
+                AutoResetEvent waitHandle = new AutoResetEvent(false);
+                Exception downloadEx = null;
+
+                wc.DownloadProgressChanged += (s, e) =>
+                {
+                    double progressFraction = e.ProgressPercentage / 100.0;
+                    int scaledPercent = minPercent + (int)(progressFraction * (maxPercent - minPercent));
+
+                    double mbRecv = e.BytesReceived / 1048576.0;
+                    double mbTotal = e.TotalBytesToReceive > 0 ? e.TotalBytesToReceive / 1048576.0 : 0.0;
+
+                    string detailText = mbTotal > 0
+                        ? string.Format("{0:F1} MB / {1:F1} MB ({2}%)", mbRecv, mbTotal, e.ProgressPercentage)
+                        : string.Format("{0:F1} MB downloaded", mbRecv);
+
+                    form.UpdateProgress(scaledPercent, actionName, detailText, stepName);
+                };
+
+                wc.DownloadFileCompleted += (s, e) =>
+                {
+                    if (e.Error != null) downloadEx = e.Error;
+                    waitHandle.Set();
+                };
+
+                wc.DownloadFileAsync(new Uri(url), tempPath);
+                waitHandle.WaitOne();
+
+                if (downloadEx != null)
+                {
+                    try { if (File.Exists(tempPath)) File.Delete(tempPath); } catch { }
+                    throw downloadEx;
+                }
+
+                if (File.Exists(destinationPath))
+                {
+                    try { File.Delete(destinationPath); } catch { }
+                }
+
+                File.Move(tempPath, destinationPath);
+            }
+        }
+
+        private string GetLatestBdsDownloadUrl()
+        {
+            string fallbackUrl = "https://www.minecraft.net/bedrockdedicatedserver/bin-win/bedrock-server-1.26.52.3.zip";
+            try
+            {
+                ServicePointManager.SecurityProtocol = (SecurityProtocolType)3072 | SecurityProtocolType.Tls;
+                HttpWebRequest req = (HttpWebRequest)WebRequest.Create("https://net-secondary.web.minecraft-services.net/api/v1.0/download/links");
+                req.UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36";
+                req.Timeout = 4000;
+                using (HttpWebResponse resp = (HttpWebResponse)req.GetResponse())
+                using (StreamReader reader = new StreamReader(resp.GetResponseStream(), Encoding.UTF8))
+                {
+                    string json = reader.ReadToEnd();
+                    int idxWin = json.IndexOf("serverBedrockWindows");
+                    if (idxWin != -1)
+                    {
+                        int urlIdx = json.IndexOf("\"downloadUrl\":", idxWin);
+                        if (urlIdx != -1)
+                        {
+                            int quoteStart = json.IndexOf("\"", urlIdx + 14);
+                            int quoteEnd = json.IndexOf("\"", quoteStart + 1);
+                            if (quoteStart != -1 && quoteEnd != -1)
+                            {
+                                string foundUrl = json.Substring(quoteStart + 1, quoteEnd - quoteStart - 1).Replace("\\/", "/");
+                                if (foundUrl.StartsWith("http", StringComparison.OrdinalIgnoreCase))
+                                {
+                                    return foundUrl;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Log("Mojang BDS API lookup notice: " + ex.Message + " (using official stable fallback).");
+            }
+            return fallbackUrl;
+        }
+
+        private void ExtractBdsZip(string zipPath, string bdsDir, SetupProgressForm form, int minPercent, int maxPercent)
+        {
+            if (!Directory.Exists(bdsDir)) Directory.CreateDirectory(bdsDir);
+
+            using (ZipArchive archive = ZipFile.OpenRead(zipPath))
+            {
+                int total = archive.Entries.Count;
+                int index = 0;
+
+                foreach (ZipArchiveEntry entry in archive.Entries)
+                {
+                    index++;
+                    string destPath = Path.GetFullPath(Path.Combine(bdsDir, entry.FullName));
+                    if (!destPath.StartsWith(bdsDir, StringComparison.OrdinalIgnoreCase)) continue;
+
+                    if (string.IsNullOrEmpty(entry.Name))
+                    {
+                        if (!Directory.Exists(destPath)) Directory.CreateDirectory(destPath);
+                    }
+                    else
+                    {
+                        string dir = Path.GetDirectoryName(destPath);
+                        if (!Directory.Exists(dir)) Directory.CreateDirectory(dir);
+
+                        // Preserve existing server configuration if already present
+                        if (entry.Name.Equals("server.properties", StringComparison.OrdinalIgnoreCase) && File.Exists(destPath))
+                        {
+                            continue;
+                        }
+
+                        entry.ExtractToFile(destPath, true);
+                    }
+
+                    if (index % 12 == 0 || index == total)
+                    {
+                        int p = minPercent + (int)(((double)index / total) * (maxPercent - minPercent));
+                        form.UpdateProgress(p, "Installing Bedrock Server...", string.Format("Extracting file {0}/{1}: {2}", index, total, entry.Name), "Step 4 of 5: Unpacking BDS");
+                    }
+                }
+            }
+
+            try { File.Delete(zipPath); } catch { }
+        }
+
         private void RunSetupWithProgress(SetupProgressForm form)
         {
             try
             {
-                form.UpdateProgress(5, "Verifying Environment...", "Checking Node.js runtime and workspace paths...", "Step 1 of 3: System Check");
+                ServicePointManager.SecurityProtocol = (SecurityProtocolType)3072 | SecurityProtocolType.Tls;
 
+                // Step 1: Check or Download Node.js runtime
                 string nodeExe = FindNodeExecutable();
-                string serverScript = Path.Combine(appDir, "server", "index.js");
-
-                if (!File.Exists(serverScript))
-                {
-                    form.ShowError("Server entry point not found at server/index.js");
-                    return;
-                }
-
                 if (string.IsNullOrEmpty(nodeExe) || !File.Exists(nodeExe))
                 {
-                    form.ShowError("Node.js was not found on your computer.\nPlease install Node.js from https://nodejs.org and re-run.");
-                    return;
-                }
+                    form.UpdateProgress(5, "Downloading Portable Node.js...", "Connecting to official Node.js distribution...", "Step 1 of 5: Node.js Runtime");
+                    string nodeUrl = Environment.Is64BitOperatingSystem
+                        ? "https://nodejs.org/dist/v20.18.0/win-x64/node.exe"
+                        : "https://nodejs.org/dist/v20.18.0/win-x86/node.exe";
 
-                string npmExe = FindNpmExecutable(nodeExe);
-                string nodeDir = Path.GetDirectoryName(nodeExe);
-                string pathEnv = Environment.GetEnvironmentVariable("PATH") ?? "";
-                if (!pathEnv.Contains(nodeDir))
-                {
-                    pathEnv = nodeDir + ";" + pathEnv;
-                }
+                    string targetNodeDir = Path.Combine(appDir, "data", "tools", "node");
+                    string targetNodeExe = Path.Combine(targetNodeDir, "node.exe");
 
-                string nodeModulesDir = Path.Combine(appDir, "node_modules");
-                if (!Directory.Exists(nodeModulesDir))
-                {
-                    Log("First-time setup detected: node_modules missing. Starting npm install with live progress tracking...");
-                    form.UpdateProgress(10, "Installing Server Dependencies (npm install)...", "Downloading and preparing Node.js packages...", "Step 1 of 3: Node Dependencies");
+                    DownloadFileWithProgress(nodeUrl, targetNodeExe, form, 5, 38, "Step 1 of 5: Node.js Runtime", "Downloading Portable Node.js...");
 
-                    ProcessStartInfo npmPsi = new ProcessStartInfo
+                    if (!File.Exists(targetNodeExe) || new FileInfo(targetNodeExe).Length < 10000000)
                     {
-                        FileName = "cmd.exe",
-                        Arguments = string.Format("/c \"\"{0}\" install --omit=dev --no-audit --no-fund\"", npmExe),
-                        WorkingDirectory = appDir,
-                        UseShellExecute = false,
-                        CreateNoWindow = true,
-                        WindowStyle = ProcessWindowStyle.Hidden,
-                        RedirectStandardOutput = true,
-                        RedirectStandardError = true
-                    };
-                    npmPsi.EnvironmentVariables["PATH"] = pathEnv;
-
-                    DateTime npmStart = DateTime.Now;
-                    using (Process npmProc = new Process())
-                    {
-                        npmProc.StartInfo = npmPsi;
-                        npmProc.OutputDataReceived += (s, e) =>
-                        {
-                            if (!string.IsNullOrEmpty(e.Data))
-                            {
-                                string clean = e.Data.Trim();
-                                if (clean.Length > 0 && !clean.StartsWith("npm notice"))
-                                {
-                                    form.UpdateProgress(-1, null, clean, null);
-                                }
-                            }
-                        };
-                        npmProc.ErrorDataReceived += (s, e) =>
-                        {
-                            if (!string.IsNullOrEmpty(e.Data) && !e.Data.Contains("npm warn"))
-                            {
-                                form.UpdateProgress(-1, null, e.Data.Trim(), null);
-                            }
-                        };
-
-                        npmProc.Start();
-                        npmProc.BeginOutputReadLine();
-                        npmProc.BeginErrorReadLine();
-
-                        // Smooth interpolation from 10% to 62% while npm executes
-                        while (!npmProc.HasExited)
-                        {
-                            Thread.Sleep(350);
-                            double elapsedSec = (DateTime.Now - npmStart).TotalSeconds;
-                            int interpolated = 10 + (int)(Math.Min(1.0, elapsedSec / 32.0) * 52);
-                            form.UpdateProgress(interpolated, "Installing Server Dependencies (npm install)...", null, "Step 1 of 3: Node Dependencies");
-                        }
-                        npmProc.WaitForExit();
-
-                        if (npmProc.ExitCode != 0 && !Directory.Exists(nodeModulesDir))
-                        {
-                            throw new Exception(string.Format("npm install failed with exit code {0}. Please check your internet connection.", npmProc.ExitCode));
-                        }
+                        throw new Exception("Downloaded Node.js binary was incomplete. Please verify your internet connection.");
                     }
 
-                    Log("Server dependencies installed successfully.");
-                    form.UpdateProgress(64, "Dependencies Installed Successfully", "✓ Core packages verified.", "Step 1 of 3 Complete");
-                    Thread.Sleep(300);
+                    nodeExe = targetNodeExe;
+                    Log("Portable Node.js runtime successfully downloaded to: " + nodeExe);
+                    form.UpdateProgress(38, "Node.js Runtime Ready", "✓ Portable Node.js engine installed.", "Step 1 of 5 Complete");
+                    Thread.Sleep(200);
                 }
                 else
                 {
-                    form.UpdateProgress(60, "Server Dependencies Verified", "✓ Core packages already installed.", "Step 1 of 3 Complete");
+                    form.UpdateProgress(38, "Node.js Runtime Verified", "✓ Node.js detected: " + Path.GetFileName(nodeExe), "Step 1 of 5 Complete");
                     Thread.Sleep(150);
                 }
 
-                // Step 2: Check client/dist
+                string serverScript = Path.Combine(appDir, "server", "index.js");
+                if (!File.Exists(serverScript))
+                {
+                    throw new FileNotFoundException("Server entry point not found at server/index.js");
+                }
+
+                // Step 2: Check server dependencies (node_modules)
+                string nodeModulesDir = Path.Combine(appDir, "node_modules");
+                if (!Directory.Exists(nodeModulesDir))
+                {
+                    string npmExe = FindNpmExecutable(nodeExe);
+                    if (File.Exists(npmExe) || npmExe == "npm.cmd")
+                    {
+                        form.UpdateProgress(40, "Installing Server Dependencies...", "Running npm install for core packages...", "Step 2 of 5: Dependencies");
+                        string nodeDir = Path.GetDirectoryName(nodeExe);
+                        string pathEnv = Environment.GetEnvironmentVariable("PATH") ?? "";
+                        if (!pathEnv.Contains(nodeDir)) pathEnv = nodeDir + ";" + pathEnv;
+
+                        ProcessStartInfo npmPsi = new ProcessStartInfo
+                        {
+                            FileName = "cmd.exe",
+                            Arguments = string.Format("/c \"\"{0}\" install --omit=dev --no-audit --no-fund\"", npmExe),
+                            WorkingDirectory = appDir,
+                            UseShellExecute = false,
+                            CreateNoWindow = true,
+                            WindowStyle = ProcessWindowStyle.Hidden,
+                            RedirectStandardOutput = true,
+                            RedirectStandardError = true
+                        };
+                        npmPsi.EnvironmentVariables["PATH"] = pathEnv;
+
+                        DateTime npmStart = DateTime.Now;
+                        using (Process npmProc = new Process())
+                        {
+                            npmProc.StartInfo = npmPsi;
+                            npmProc.OutputDataReceived += (s, e) => { if (!string.IsNullOrEmpty(e.Data)) form.UpdateProgress(-1, null, e.Data.Trim(), null); };
+                            npmProc.ErrorDataReceived += (s, e) => { if (!string.IsNullOrEmpty(e.Data)) form.UpdateProgress(-1, null, e.Data.Trim(), null); };
+                            npmProc.Start();
+                            npmProc.BeginOutputReadLine();
+                            npmProc.BeginErrorReadLine();
+
+                            while (!npmProc.HasExited)
+                            {
+                                Thread.Sleep(350);
+                                double elapsedSec = (DateTime.Now - npmStart).TotalSeconds;
+                                int interpolated = 40 + (int)(Math.Min(1.0, elapsedSec / 30.0) * 18);
+                                form.UpdateProgress(interpolated, "Installing Server Dependencies...", null, "Step 2 of 5: Dependencies");
+                            }
+                            npmProc.WaitForExit();
+
+                            if (npmProc.ExitCode != 0 && !Directory.Exists(nodeModulesDir))
+                            {
+                                throw new Exception(string.Format("npm install failed with exit code {0}.", npmProc.ExitCode));
+                            }
+                        }
+                    }
+                    else
+                    {
+                        throw new DirectoryNotFoundException("The node_modules folder is missing and npm was not found. Please ensure project files were fully extracted.");
+                    }
+
+                    form.UpdateProgress(58, "Dependencies Installed", "✓ Server packages verified.", "Step 2 of 5 Complete");
+                    Thread.Sleep(200);
+                }
+                else
+                {
+                    form.UpdateProgress(58, "Dependencies Verified", "✓ Core server modules verified.", "Step 2 of 5 Complete");
+                    Thread.Sleep(150);
+                }
+
+                // Step 3: Check client/dist
                 string clientIndex = Path.Combine(appDir, "client", "dist", "index.html");
                 if (!File.Exists(clientIndex))
                 {
-                    form.UpdateProgress(65, "Compiling Web Dashboard...", "Building client web assets with Vite...", "Step 2 of 3: Frontend Build");
-                    DateTime buildStart = DateTime.Now;
-
+                    string npmExe = FindNpmExecutable(nodeExe);
+                    form.UpdateProgress(60, "Building Web Dashboard Assets...", "Compiling frontend assets with Vite...", "Step 3 of 5: Web Assets");
                     string clientDir = Path.Combine(appDir, "client");
                     ProcessStartInfo buildPsi = new ProcessStartInfo
                     {
@@ -534,54 +705,68 @@ namespace BedrockServerManager.Tray
                         RedirectStandardOutput = true,
                         RedirectStandardError = true
                     };
-                    buildPsi.EnvironmentVariables["PATH"] = pathEnv;
-
-                    using (Process buildProc = new Process())
+                    using (Process p = Process.Start(buildPsi))
                     {
-                        buildProc.StartInfo = buildPsi;
-                        buildProc.OutputDataReceived += (s, e) =>
-                        {
-                            if (!string.IsNullOrEmpty(e.Data)) form.UpdateProgress(-1, null, e.Data.Trim(), null);
-                        };
-                        buildProc.Start();
-                        buildProc.BeginOutputReadLine();
+                        p.WaitForExit();
+                    }
+                }
+                form.UpdateProgress(62, "Dashboard Assets Verified", "✓ Web dashboard ready.", "Step 3 of 5 Complete");
+                Thread.Sleep(150);
 
-                        while (!buildProc.HasExited)
-                        {
-                            Thread.Sleep(350);
-                            double elapsedSec = (DateTime.Now - buildStart).TotalSeconds;
-                            int interpolated = 65 + (int)(Math.Min(1.0, elapsedSec / 22.0) * 20);
-                            form.UpdateProgress(interpolated, "Compiling Web Dashboard...", null, "Step 2 of 3: Frontend Build");
-                        }
-                        buildProc.WaitForExit();
+                // Step 4: Check or Download Minecraft Bedrock Dedicated Server (BDS)
+                string bdsDir = Path.Combine(appDir, "bds");
+                string bdsExe = Path.Combine(bdsDir, "bedrock_server.exe");
+                if (!File.Exists(bdsExe))
+                {
+                    form.UpdateProgress(64, "Resolving Bedrock Server...", "Querying official Mojang Bedrock download servers...", "Step 4 of 5: Minecraft Server");
+                    string bdsUrl = GetLatestBdsDownloadUrl();
+                    Log("Downloading official Bedrock Dedicated Server from: " + bdsUrl);
+
+                    string uploadDir = Path.Combine(appDir, "data", "uploads");
+                    if (!Directory.Exists(uploadDir)) Directory.CreateDirectory(uploadDir);
+                    string zipPath = Path.Combine(uploadDir, "bedrock-server-initial.zip");
+
+                    DownloadFileWithProgress(bdsUrl, zipPath, form, 64, 82, "Step 4 of 5: Minecraft Server", "Downloading Official Bedrock Server...");
+
+                    form.UpdateProgress(82, "Extracting Bedrock Server...", "Unpacking official Mojang server files to bds/...", "Step 4 of 5: Extracting");
+                    ExtractBdsZip(zipPath, bdsDir, form, 82, 91);
+
+                    if (!File.Exists(bdsExe))
+                    {
+                        throw new FileNotFoundException("Failed to locate bedrock_server.exe after extracting BDS archive.");
                     }
 
-                    form.UpdateProgress(85, "Dashboard Built Successfully", "✓ Production web assets compiled.", "Step 2 of 3 Complete");
-                    Thread.Sleep(250);
+                    Log("Official Bedrock Dedicated Server successfully downloaded and installed to: " + bdsDir);
+                    form.UpdateProgress(91, "Minecraft Server Ready", "✓ Mojang Bedrock Server executable installed.", "Step 4 of 5 Complete");
+                    Thread.Sleep(200);
                 }
                 else
                 {
-                    form.UpdateProgress(85, "Dashboard Assets Verified", "✓ Pre-built client dist assets verified.", "Step 2 of 3 Complete");
+                    form.UpdateProgress(90, "Minecraft Server Verified", "✓ Bedrock Dedicated Server binary found.", "Step 4 of 5 Complete");
                     Thread.Sleep(150);
                 }
 
-                // Step 3: Launch Node backend & wait for responsiveness
-                form.UpdateProgress(88, "Starting Server Backend...", "Spawning Node.js background process...", "Step 3 of 3: Server Online");
+                // Step 5: Start Node Backend & Verify Server Health
+                form.UpdateProgress(92, "Starting Server Backend...", "Spawning Node.js background process...", "Step 5 of 5: Server Online");
                 StartNodeBackendProcess();
 
-                // Wait for health check
                 int checkAttempts = 0;
                 bool isReady = false;
-                while (checkAttempts < 30 && !isReady)
+                while (checkAttempts < 35 && !isReady)
                 {
                     isReady = IsServerResponding();
                     if (!isReady)
                     {
                         Thread.Sleep(400);
                         checkAttempts++;
-                        int p = Math.Min(98, 88 + (checkAttempts / 3));
-                        form.UpdateProgress(p, "Starting Server Backend...", string.Format("Connecting to manager on port 3001 (attempt {0}/30)...", checkAttempts), "Step 3 of 3: Health Check");
+                        int p = Math.Min(99, 92 + (int)((checkAttempts / 35.0) * 7));
+                        form.UpdateProgress(p, "Starting Server Backend...", string.Format("Verifying manager connection on port 3001 (attempt {0}/35)...", checkAttempts), "Step 5 of 5: Health Check");
                     }
+                }
+
+                if (!isReady)
+                {
+                    throw new Exception("The server manager backend started but did not respond on http://localhost:3001 in time. Please check data/logs/manager-launcher.log.");
                 }
 
                 form.UpdateProgress(100, "✓ Setup Complete!", "Bedrock Server Manager is online at http://localhost:3001", "Ready!");
@@ -589,14 +774,32 @@ namespace BedrockServerManager.Tray
             }
             catch (Exception ex)
             {
-                Log("Setup error: " + ex.Message);
-                form.ShowError("Setup failed: " + ex.Message);
+                Log("Setup error: " + ex.Message + "\n" + ex.StackTrace);
+                form.ShowError(ex.Message);
             }
         }
 
         private string FindNodeExecutable()
         {
-            // 1. Direct standard installation paths
+            // 1. Portable Node in app directory or data/tools/node
+            string[] localPaths = new string[]
+            {
+                Path.Combine(appDir, "data", "tools", "node", "node.exe"),
+                Path.Combine(appDir, "tools", "node", "node.exe"),
+                Path.Combine(appDir, "tools", "node.exe"),
+                Path.Combine(appDir, "node.exe")
+            };
+
+            foreach (string p in localPaths)
+            {
+                try
+                {
+                    if (File.Exists(p) && new FileInfo(p).Length > 10000000) return p;
+                }
+                catch { }
+            }
+
+            // 2. Direct standard installation paths
             string[] standardPaths = new string[]
             {
                 @"C:\Program Files\nodejs\node.exe",
@@ -605,8 +808,7 @@ namespace BedrockServerManager.Tray
                 Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), @"nvm\current\node.exe"),
                 Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), @"npm\node.exe"),
                 @"C:\ProgramData\chocolatey\bin\node.exe",
-                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), @"scoop\apps\nodejs\current\node.exe"),
-                Path.Combine(appDir, "node.exe")
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), @"scoop\apps\nodejs\current\node.exe")
             };
 
             foreach (string p in standardPaths)
@@ -618,7 +820,7 @@ namespace BedrockServerManager.Tray
                 catch { }
             }
 
-            // 2. Scan every directory listed in system & user %PATH%
+            // 3. Scan system & user PATH
             string pathEnv = Environment.GetEnvironmentVariable("PATH") ?? "";
             string[] pathDirs = pathEnv.Split(new char[] { Path.PathSeparator }, StringSplitOptions.RemoveEmptyEntries);
             foreach (string dir in pathDirs)
@@ -631,7 +833,7 @@ namespace BedrockServerManager.Tray
                 catch { }
             }
 
-            // 3. Fallback: ask `cmd.exe /c where node`
+            // 4. Fallback: ask `cmd.exe /c where node`
             try
             {
                 ProcessStartInfo wherePsi = new ProcessStartInfo("cmd.exe", "/c where node")
@@ -1070,11 +1272,14 @@ namespace BedrockServerManager.Tray
         private Label lblElapsed;
         private Label lblNote;
         private Button btnClose;
+        private Button btnRetry;
+        private Button btnViewLogs;
         private ModernProgressBar progressBar;
         private System.Windows.Forms.Timer elapsedTimer;
         private DateTime startTime;
         private int currentPercent = 0;
         private Icon customIcon;
+        private Action<SetupProgressForm> currentWorkerAction;
 
         public SetupProgressForm(Icon icon)
         {
@@ -1086,8 +1291,8 @@ namespace BedrockServerManager.Tray
         {
             this.SuspendLayout();
 
-            this.Width = 530;
-            this.Height = 250;
+            this.Width = 540;
+            this.Height = 255;
             this.FormBorderStyle = FormBorderStyle.None;
             this.StartPosition = FormStartPosition.CenterScreen;
             this.BackColor = Color.FromArgb(15, 23, 42); // Slate-900
@@ -1149,7 +1354,7 @@ namespace BedrockServerManager.Tray
             pnlHeader.Controls.Add(lblAppTitle);
 
             lblSubTitle = new Label();
-            lblSubTitle.Text = "First-Time Setup & Dependency Preparation";
+            lblSubTitle.Text = "First-Time Setup & Component Installation";
             lblSubTitle.Font = new Font("Segoe UI", 8.5f, FontStyle.Regular);
             lblSubTitle.ForeColor = Color.FromArgb(148, 163, 184); // Slate-400
             lblSubTitle.AutoSize = true;
@@ -1185,7 +1390,7 @@ namespace BedrockServerManager.Tray
             lblStatus.Font = new Font("Segoe UI", 10.5f, FontStyle.Bold);
             lblStatus.ForeColor = Color.FromArgb(52, 211, 153); // Emerald-400
             lblStatus.Location = new Point(22, 72);
-            lblStatus.Size = new Size(485, 22);
+            lblStatus.Size = new Size(495, 22);
             lblStatus.AutoEllipsis = true;
             this.Controls.Add(lblStatus);
 
@@ -1195,13 +1400,13 @@ namespace BedrockServerManager.Tray
             lblDetails.Font = new Font("Segoe UI", 8.5f, FontStyle.Regular);
             lblDetails.ForeColor = Color.FromArgb(148, 163, 184);
             lblDetails.Location = new Point(23, 96);
-            lblDetails.Size = new Size(485, 20);
+            lblDetails.Size = new Size(495, 20);
             lblDetails.AutoEllipsis = true;
             this.Controls.Add(lblDetails);
 
             // 4. Step indicator (left above bar)
             lblStep = new Label();
-            lblStep.Text = "Step 1 of 3: Core Packages";
+            lblStep.Text = "Step 1 of 5: Initializing";
             lblStep.Font = new Font("Segoe UI", 8.5f, FontStyle.Bold);
             lblStep.ForeColor = Color.FromArgb(100, 116, 139); // Slate-500
             lblStep.Location = new Point(22, 124);
@@ -1214,14 +1419,14 @@ namespace BedrockServerManager.Tray
             lblPercent.Font = new Font("Segoe UI", 12f, FontStyle.Bold);
             lblPercent.ForeColor = Color.FromArgb(52, 211, 153); // Emerald
             lblPercent.TextAlign = ContentAlignment.MiddleRight;
-            lblPercent.Location = new Point(410, 118);
+            lblPercent.Location = new Point(420, 118);
             lblPercent.Size = new Size(98, 24);
             this.Controls.Add(lblPercent);
 
             // 6. Modern Progress Bar
             progressBar = new ModernProgressBar();
             progressBar.Location = new Point(22, 148);
-            progressBar.Size = new Size(485, 22);
+            progressBar.Size = new Size(495, 22);
             progressBar.Value = 0;
             progressBar.Maximum = 100;
             this.Controls.Add(progressBar);
@@ -1232,18 +1437,68 @@ namespace BedrockServerManager.Tray
             lblNote.Font = new Font("Segoe UI", 8f, FontStyle.Italic);
             lblNote.ForeColor = Color.FromArgb(100, 116, 139);
             lblNote.Location = new Point(22, 186);
-            lblNote.Size = new Size(340, 20);
+            lblNote.Size = new Size(260, 20);
             this.Controls.Add(lblNote);
 
-            // 8. Elapsed timer (right)
+            // 8. Elapsed timer (right when normal)
             lblElapsed = new Label();
             lblElapsed.Text = "⏱ 00:00";
             lblElapsed.Font = new Font("Segoe UI", 8.5f, FontStyle.Regular);
             lblElapsed.ForeColor = Color.FromArgb(148, 163, 184);
             lblElapsed.TextAlign = ContentAlignment.MiddleRight;
-            lblElapsed.Location = new Point(410, 184);
+            lblElapsed.Location = new Point(420, 184);
             lblElapsed.Size = new Size(98, 20);
             this.Controls.Add(lblElapsed);
+
+            // 9. Retry button (shown on error)
+            btnRetry = new Button();
+            btnRetry.Text = "🔄 Retry Setup";
+            btnRetry.Font = new Font("Segoe UI", 8.5f, FontStyle.Bold);
+            btnRetry.ForeColor = Color.White;
+            btnRetry.BackColor = Color.FromArgb(16, 185, 129); // Emerald-600
+            btnRetry.FlatStyle = FlatStyle.Flat;
+            btnRetry.FlatAppearance.BorderSize = 0;
+            btnRetry.Size = new Size(110, 28);
+            btnRetry.Location = new Point(this.Width - 235, 180);
+            btnRetry.Cursor = Cursors.Hand;
+            btnRetry.Visible = false;
+            btnRetry.Click += (s, e) =>
+            {
+                btnRetry.Visible = false;
+                btnViewLogs.Visible = false;
+                lblStatus.ForeColor = Color.FromArgb(52, 211, 153);
+                lblPercent.ForeColor = Color.FromArgb(52, 211, 153);
+                UpdateProgress(0, "Retrying setup...", "Restarting component downloads...", "Preparing...");
+                if (currentWorkerAction != null)
+                {
+                    StartSetupTask(currentWorkerAction);
+                }
+            };
+            this.Controls.Add(btnRetry);
+
+            // 10. View logs button (shown on error)
+            btnViewLogs = new Button();
+            btnViewLogs.Text = "📋 View Logs";
+            btnViewLogs.Font = new Font("Segoe UI", 8.5f, FontStyle.Regular);
+            btnViewLogs.ForeColor = Color.FromArgb(203, 213, 225);
+            btnViewLogs.BackColor = Color.FromArgb(51, 65, 85); // Slate-700
+            btnViewLogs.FlatStyle = FlatStyle.Flat;
+            btnViewLogs.FlatAppearance.BorderSize = 0;
+            btnViewLogs.Size = new Size(95, 28);
+            btnViewLogs.Location = new Point(this.Width - 118, 180);
+            btnViewLogs.Cursor = Cursors.Hand;
+            btnViewLogs.Visible = false;
+            btnViewLogs.Click += (s, e) =>
+            {
+                try
+                {
+                    string baseDir = AppDomain.CurrentDomain.BaseDirectory;
+                    string logP = Path.Combine(baseDir, "data", "logs", "manager-launcher.log");
+                    if (File.Exists(logP)) Process.Start("notepad.exe", logP);
+                }
+                catch { }
+            };
+            this.Controls.Add(btnViewLogs);
 
             // Draw outer border
             this.Paint += (s, e) =>
@@ -1259,14 +1514,18 @@ namespace BedrockServerManager.Tray
 
         public void StartSetupTask(Action<SetupProgressForm> workerAction)
         {
+            this.currentWorkerAction = workerAction;
             this.startTime = DateTime.Now;
-            this.elapsedTimer = new System.Windows.Forms.Timer();
-            this.elapsedTimer.Interval = 500;
-            this.elapsedTimer.Tick += (s, e) =>
+            if (this.elapsedTimer == null)
             {
-                TimeSpan span = DateTime.Now - startTime;
-                lblElapsed.Text = string.Format("⏱ {0:00}:{1:00}", (int)span.TotalMinutes, span.Seconds);
-            };
+                this.elapsedTimer = new System.Windows.Forms.Timer();
+                this.elapsedTimer.Interval = 500;
+                this.elapsedTimer.Tick += (s, e) =>
+                {
+                    TimeSpan span = DateTime.Now - startTime;
+                    lblElapsed.Text = string.Format("⏱ {0:00}:{1:00}", (int)span.TotalMinutes, span.Seconds);
+                };
+            }
             this.elapsedTimer.Start();
 
             ThreadPool.QueueUserWorkItem(state =>
@@ -1318,18 +1577,10 @@ namespace BedrockServerManager.Tray
             lblStatus.Text = "Setup Notice";
             lblStatus.ForeColor = Color.FromArgb(239, 68, 68); // Red
             lblDetails.Text = errorMsg;
-            lblStep.Text = "Please review data\\logs\\manager-launcher.log";
+            lblStep.Text = "Setup could not complete automatically.";
             lblPercent.ForeColor = Color.FromArgb(239, 68, 68);
-
-            System.Windows.Forms.Timer closeTimer = new System.Windows.Forms.Timer();
-            closeTimer.Interval = 4000;
-            closeTimer.Tick += (s, e) =>
-            {
-                closeTimer.Stop();
-                this.DialogResult = DialogResult.Cancel;
-                this.Close();
-            };
-            closeTimer.Start();
+            if (btnRetry != null) btnRetry.Visible = true;
+            if (btnViewLogs != null) btnViewLogs.Visible = true;
         }
 
         public void CompleteAndClose()

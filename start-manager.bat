@@ -7,7 +7,17 @@ echo.
 
 cd /d "%~dp0"
 
-:: 1. Verify Node.js is installed
+:: 1. Launch native Windows Tray Launcher (has automated setup for Node.js, BDS server, & progress bar)
+if exist "%~dp0BedrockServerManager.exe" (
+    echo Launching native Windows Launcher (BedrockServerManager.exe)...
+    echo The manager runs in your Windows Taskbar Overflow Tray.
+    echo Web Dashboard: http://localhost:3001
+    echo.
+    start "" "%~dp0BedrockServerManager.exe"
+    exit /b 0
+)
+
+:: 2. CLI Fallback if BedrockServerManager.exe is not present
 where node >nul 2>&1
 if %ERRORLEVEL% neq 0 (
     echo [ERROR] Node.js was not found on your system!
@@ -16,16 +26,6 @@ if %ERRORLEVEL% neq 0 (
     echo.
     pause
     exit /b 1
-)
-
-:: 2. Launch native Windows Tray Launcher (with GUI setup & progress bar)
-if exist "%~dp0BedrockServerManager.exe" (
-    echo Launching native Windows Launcher (BedrockServerManager.exe)...
-    echo The app will sit in your Windows Taskbar Overflow Tray.
-    echo Web Dashboard: http://localhost:3001
-    echo.
-    start "" "%~dp0BedrockServerManager.exe"
-    exit /b 0
 )
 
 :: 3. CLI Fallback if BedrockServerManager.exe is not present

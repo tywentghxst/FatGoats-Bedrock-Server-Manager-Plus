@@ -1,8 +1,19 @@
 # 🚀 Minecraft Bedrock Dedicated Server (BDS) Manager
 
-A modern, full-stack self-hosted administration panel designed to operate, monitor, configure, update, and manage a Minecraft Bedrock Dedicated Server instance directly from a web browser. .
+A modern, full-stack self-hosted administration panel designed to operate, monitor, configure, update, and manage a Minecraft Bedrock Dedicated Server instance directly from a web browser.
 
 ---
+
+## 💾 Quick Installation (Windows Standalone Setup)
+
+Download the one-click installer executable from GitHub Releases:
+**[⬇️ Download BedrockServerManager-Setup.exe (v1.1.0)](https://github.com/tywentghxst/FatGoats-Bedrock-Server-Manager-Plus/releases/latest/download/BedrockServerManager-Setup.exe)**
+
+The setup wizard automatically:
+1. **Runtime Verification**: Checks for Node.js runtime (and automatically downloads/configures the official Node.js LTS runtime if missing).
+2. **Automated Dependencies**: Installs all required packages (`npm install`) and packages pre-compiled client assets.
+3. **Windows Tray App**: Builds and registers `BedrockServerManager.exe` (sits in Windows system tray overflow area).
+4. **Shortcuts & Auto-Launch**: Generates Desktop & Start Menu shortcuts with the custom Bedrock icon, auto-starts the background server, and opens your browser to `http://localhost:3001`.
 
 ## 🌟 Core Features Overview
 

@@ -252,7 +252,7 @@ router.post('/action', async (req, res) => {
     } else if (action === 'start_all') {
       const playitService = require('../services/playitService');
       if (serverProcess.state !== 'running') await serverProcess.start().catch((e) => console.warn(e.message));
-      if (!playitService.getStatus().isRunning) await playitService.start().catch((e) => console.warn(e.message));
+      if (playitService.isClaimed() && !playitService.getStatus().isRunning) await playitService.start().catch((e) => console.warn(e.message));
       const xb = broadcasterService.getStatus();
       if (xb.account?.authenticated && xb.state !== 'running') await broadcasterService.start().catch((e) => console.warn(e.message));
       logAudit(user ? user.id : null, userLabel, 'PORTAL_START_ALL', 'Player portal requested start all systems');
@@ -260,7 +260,7 @@ router.post('/action', async (req, res) => {
     } else if (action === 'restart_all') {
       const playitService = require('../services/playitService');
       await serverProcess.restart().catch((e) => console.warn(e.message));
-      await playitService.restart().catch((e) => console.warn(e.message));
+      if (playitService.isClaimed()) await playitService.restart().catch((e) => console.warn(e.message));
       const xb = broadcasterService.getStatus();
       if (xb.account?.authenticated) await broadcasterService.restart().catch((e) => console.warn(e.message));
       logAudit(user ? user.id : null, userLabel, 'PORTAL_RESTART_ALL', 'Player portal requested restart all systems');

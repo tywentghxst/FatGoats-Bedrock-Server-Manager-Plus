@@ -450,7 +450,7 @@ suppress-session-update-message: false
     }
 
     // 2. Detect Successful Login / Gamertag
-    // e.g. "Successfully authenticated as The FatGoats595 (2535472796844934) with 10/1000 friends"
+    // e.g. "Successfully authenticated as Gamertag (123456789) with 10/1000 friends"
     // e.g. "Signed in as <Gamertag> (<XUID>)"
     // e.g. "Logged in as <Gamertag>"
     const signinMatch = uncolored.match(/(?:Successfully authenticated as|Signed in as|Logged in as:?|Authenticated as|Logged in as user)\s+([^(]+?)(?:\s+\(([0-9]+)\))?(?:\s+with\s+([0-9]+)(?:\/[0-9]+)?\s+friends)?(?:\s*$|\s+with)/i);

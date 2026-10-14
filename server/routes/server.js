@@ -96,12 +96,16 @@ router.post('/start-all', requireOperatorOrAdmin, async (req, res) => {
       results.errors.push(`Server: ${err.message}`);
     }
 
-    // 2. Playit Tunnel
+    // 2. Playit Tunnel (only if claimed)
     try {
-      if (!playitService.getStatus().isRunning) {
-        results.tunnel = await playitService.start();
+      if (playitService.isClaimed()) {
+        if (!playitService.getStatus().isRunning) {
+          results.tunnel = await playitService.start();
+        } else {
+          results.tunnel = { message: 'Playit tunnel is already running', state: 'running' };
+        }
       } else {
-        results.tunnel = { message: 'Playit tunnel is already running', state: 'running' };
+        results.tunnel = { message: 'Playit tunnel is not yet claimed or configured', state: 'unclaimed' };
       }
     } catch (err) {
       results.errors.push(`Playit: ${err.message}`);

@@ -3,7 +3,7 @@ node_modules/
 client/node_modules/
 
 # Bedrock server binaries and world data
-bds/
+bds/*
 !bds/behavior_packs/
 !bds/resource_packs/
 bds/behavior_packs/*

@@ -1,0 +1,116 @@
+// Collect sample packets needed for `serverTest.js`
+// process.env.DEBUG = 'minecraft-protocol'
+const fs = require('fs')
+const vanillaServer = require('../tools/startVanillaServer')
+const { createVanillaClient, getTransport } = require('../tools/vanillaClient')
+const { serialize, waitFor, getFiles } = require('../src/datatypes/util')
+const { CURRENT_VERSION } = require('../src/options')
+const { join } = require('path')
+const { getPort } = require('../test/util')
+
+function hasDumps (version) {
+  const root = join(__dirname, `../data/${version}/sample/packets/`)
+
+  if (!fs.existsSync(root) || getFiles(root).length < 10) {
+    return false
+  }
+
+  return true
+}
+
+// Pass an existingPort to dump from an already running server instead of
+// booting (and killing) one here.
+async function dump (version, force = true, existingPort = null) {
+  version ||= CURRENT_VERSION
+  const random = (Math.random() * 1000) | 0
+  let loop
+  let handle
+  let port = existingPort
+
+  if (!existingPort) {
+    let v6
+    const protocol = getTransport(version) === 'nethernet' ? 'tcp' : 'udp'
+    ;[port, v6] = [await getPort(protocol), await getPort(protocol)]
+    console.log('Starting dump server', version, 'on port', port, v6)
+    handle = await vanillaServer.startServerAndWait2(version, 1000 * 120, { 'server-port': port, 'server-portv6': v6 })
+    console.log('Started dump server', version)
+  }
+  const client = createVanillaClient({
+    host: '127.0.0.1',
+    port,
+    version,
+    username: 'Packet' + random,
+    offline: true
+  })
+  client.connect()
+  return waitFor(async res => {
+    const root = join(__dirname, `../data/${client.options.version}/sample/`)
+
+    fs.mkdirSync(root + 'packets', { recursive: true })
+    fs.mkdirSync(root + 'chunks', { recursive: true })
+
+    client.once('resource_packs_info', (packet) => {
+      client.write('resource_pack_client_response', {
+        response_status: 'completed',
+        response_status_name: 'resourcepackstackfinished',
+        resourcepackids: []
+      })
+
+      client.once('resource_pack_stack', (stack) => {
+        client.write('resource_pack_client_response', {
+          response_status: 'completed',
+          response_status_name: 'resourcepackstackfinished',
+          resourcepackids: []
+        })
+      })
+
+      client.queue('client_cache_status', { enabled: false })
+      client.queue('request_chunk_radius', { chunk_radius: 1 })
+
+      clearInterval(loop)
+
+      loop = setInterval(() => {
+        client.queue('tick_sync', { request_time: BigInt(Date.now()), response_time: BigInt(Date.now()) })
+      }, 200)
+    })
+
+    let i = 0
+
+    client.on('packet', async packet => { // Packet dumping
+      const { name, params } = packet.data
+
+      if (name === 'level_chunk') {
+        fs.writeFileSync(root + `chunks/${name}-${i++}.bin`, packet.buffer)
+        return
+      }
+
+      try {
+        if (!fs.existsSync(root + `packets/${name}.json`) || force) {
+          fs.writeFileSync(root + `packets/${name}.json`, serialize(params, 2))
+        }
+      } catch (e) { console.log(e) }
+    })
+
+    console.log('Awaiting join...')
+
+    client.on('spawn', () => {
+      console.log('Spawned!')
+
+      clearInterval(loop)
+      client.close()
+      handle?.kill()
+      res()
+    })
+  }, 1000 * 60, () => {
+    clearInterval(loop)
+    handle?.kill()
+    throw Error('Timed out')
+  })
+}
+
+if (!module.parent) {
+  dump(null, true).then(() => {
+    console.log('Successfully dumped packets')
+  })
+}
+module.exports = { dumpPackets: dump, hasDumps }

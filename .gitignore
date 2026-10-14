@@ -1,5 +1,4 @@
 # Dependencies
-node_modules/
 client/node_modules/
 
 # Bedrock server binaries and world data

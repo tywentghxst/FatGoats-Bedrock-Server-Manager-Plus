@@ -1,6 +1,6 @@
 # 🚀 Minecraft Bedrock Dedicated Server (BDS) Manager
 
-A modern, full-stack self-hosted administration panel designed to operate, monitor, configure, update, and manage a Minecraft Bedrock Dedicated Server instance directly from a web browser.
+A modern, full-stack self-hosted administration panel designed to operate, monitor, configure, update, and manage a Minecraft Bedrock Dedicated Server instance directly from a web browser. .
 
 ---
 

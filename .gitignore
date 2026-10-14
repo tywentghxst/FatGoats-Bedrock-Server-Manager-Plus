@@ -2,9 +2,6 @@
 node_modules/
 client/node_modules/
 
-# Production build
-client/dist/
-
 # Bedrock server binaries and world data
 bds/
 !bds/behavior_packs/

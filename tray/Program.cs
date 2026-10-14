@@ -323,6 +323,68 @@ namespace BedrockServerManager.Tray
                     return;
                 }
 
+                // First-time setup auto-detection: if node_modules is missing, install dependencies automatically
+                string nodeModulesDir = Path.Combine(appDir, "node_modules");
+                if (!Directory.Exists(nodeModulesDir))
+                {
+                    Log("First-time setup detected: node_modules directory missing. Installing dependencies...");
+                    try
+                    {
+                        notifyIcon.ShowBalloonTip(6000, "Bedrock Server Manager", "First-time setup: Installing server dependencies... Please wait a moment.", ToolTipIcon.Info);
+                    }
+                    catch { }
+
+                    try
+                    {
+                        ProcessStartInfo npmPsi = new ProcessStartInfo
+                        {
+                            FileName = "cmd.exe",
+                            Arguments = "/c npm install --omit=dev --no-audit --no-fund",
+                            WorkingDirectory = appDir,
+                            UseShellExecute = false,
+                            CreateNoWindow = true,
+                            WindowStyle = ProcessWindowStyle.Hidden
+                        };
+                        using (Process npmProc = Process.Start(npmPsi))
+                        {
+                            npmProc.WaitForExit(120000); // 2 minutes max
+                        }
+                        Log("Server dependencies installed successfully.");
+                    }
+                    catch (Exception ex)
+                    {
+                        Log("Notice during npm install: " + ex.Message);
+                    }
+                }
+
+                // If client/dist is missing, build it
+                string clientIndex = Path.Combine(appDir, "client", "dist", "index.html");
+                if (!File.Exists(clientIndex))
+                {
+                    Log("client/dist missing. Compiling web dashboard assets...");
+                    try
+                    {
+                        ProcessStartInfo buildPsi = new ProcessStartInfo
+                        {
+                            FileName = "cmd.exe",
+                            Arguments = "/c cd client && npm install --no-audit --no-fund && npm run build",
+                            WorkingDirectory = appDir,
+                            UseShellExecute = false,
+                            CreateNoWindow = true,
+                            WindowStyle = ProcessWindowStyle.Hidden
+                        };
+                        using (Process buildProc = Process.Start(buildPsi))
+                        {
+                            buildProc.WaitForExit(120000);
+                        }
+                        Log("Web dashboard built successfully.");
+                    }
+                    catch (Exception ex)
+                    {
+                        Log("Notice during client build: " + ex.Message);
+                    }
+                }
+
                 Log("Spawning Node backend: " + nodeExe + " " + serverScript);
 
                 ProcessStartInfo psi = new ProcessStartInfo();

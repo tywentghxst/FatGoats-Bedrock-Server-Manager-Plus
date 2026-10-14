@@ -40,6 +40,18 @@ async function main() {
     }
   }
 
+  // Ensure default server.properties exists in BDS dir
+  const propsPath = path.join(config.BDS_DIR, 'server.properties');
+  if (!fs.existsSync(propsPath)) {
+    try {
+      const { getDefaultProperties, writeProperties } = require('./utils/propertyParser');
+      writeProperties(propsPath, getDefaultProperties());
+      console.log('[Init] Created default server.properties in BDS directory');
+    } catch (err) {
+      console.warn('[Init] Notice creating default server.properties:', err.message);
+    }
+  }
+
   // Global Middlewares
   app.use(cors());
   app.use(express.json({ limit: '100mb' }));
@@ -88,20 +100,45 @@ async function main() {
   const backupService = require('./services/backupService');
   backupService.initAutoBackupScheduler(serverProcess);
 
-  // Serve client in production
+  // Serve pre-built client dashboard
   const clientDist = path.join(__dirname, '..', 'client', 'dist');
-  if (process.env.NODE_ENV === 'production' || fs.existsSync(clientDist)) {
+  if (fs.existsSync(clientDist)) {
     app.use(express.static(clientDist));
-    app.get('*', (req, res, next) => {
-      if (req.path.startsWith('/api/')) return next();
-      const indexPath = path.join(clientDist, 'index.html');
-      if (fs.existsSync(indexPath)) {
-        res.sendFile(indexPath);
-      } else {
-        res.status(404).send('Client not built. Run "npm run build".');
-      }
-    });
   }
+
+  // Catch-all frontend router
+  app.get('*', (req, res, next) => {
+    if (req.path.startsWith('/api/')) return next();
+    const indexPath = path.join(clientDist, 'index.html');
+    if (fs.existsSync(indexPath)) {
+      return res.sendFile(indexPath);
+    }
+    // Friendly fallback while client is preparing
+    res.status(200).send(`
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>Bedrock Dedicated Server Manager</title>
+          <meta http-equiv="refresh" content="3">
+          <style>
+            body { background: #0f172a; color: #f8fafc; font-family: system-ui, sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; text-align: center; }
+            .box { background: #1e293b; padding: 2.5rem; border-radius: 1rem; border: 1px solid #334155; max-width: 500px; box-shadow: 0 10px 25px rgba(0,0,0,0.5); }
+            h1 { color: #34d399; margin-top: 0; }
+            p { color: #94a3b8; font-size: 0.95rem; line-height: 1.5; }
+            .spinner { border: 3px solid rgba(255,255,255,0.1); border-top-color: #34d399; border-radius: 50%; width: 28px; height: 28px; animation: spin 0.8s linear infinite; margin: 1.5rem auto 0; }
+            @keyframes spin { to { transform: rotate(360deg); } }
+          </style>
+        </head>
+        <body>
+          <div class="box">
+            <h1>🎮 Bedrock Server Manager</h1>
+            <p>The manager backend is online and running on <strong>Port ${config.PORT}</strong>.<br/>Loading web dashboard assets, please wait...</p>
+            <div class="spinner"></div>
+          </div>
+        </body>
+      </html>
+    `);
+  });
 
   // Global error handler
   app.use((err, _req, res, _next) => {

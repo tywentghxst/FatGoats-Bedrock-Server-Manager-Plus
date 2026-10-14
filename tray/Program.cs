@@ -208,7 +208,10 @@ namespace BedrockServerManager.Tray
             // 6. Restart Manager
             contextMenu.Items.Add(new ToolStripMenuItem("🔄 Restart Manager", null, (s, e) => RestartApp()));
 
-            // 7. Exit
+            // 7. Maintenance / Setup
+            contextMenu.Items.Add(new ToolStripMenuItem("⚙️ Uninstall / Reinstall...", null, (s, e) => LaunchSetupWizard()));
+
+            // 8. Exit
             contextMenu.Items.Add(new ToolStripMenuItem("❌ Exit & Stop Server", null, (s, e) => ExitApplication()));
 
             // Extract application icon safely without holding file locks
@@ -629,6 +632,53 @@ namespace BedrockServerManager.Tray
                 ExitApplication();
             }
             catch { }
+        }
+
+        private void LaunchSetupWizard()
+        {
+            try
+            {
+                string setupPath = Path.Combine(appDir, "BedrockServerManager-Setup.exe");
+                if (!File.Exists(setupPath))
+                {
+                    try
+                    {
+                        DirectoryInfo parent = Directory.GetParent(appDir);
+                        if (parent != null)
+                        {
+                            string parentSetup = Path.Combine(parent.FullName, "BedrockServerManager-Setup.exe");
+                            if (File.Exists(parentSetup))
+                            {
+                                setupPath = parentSetup;
+                            }
+                        }
+                    }
+                    catch { }
+                }
+
+                if (File.Exists(setupPath))
+                {
+                    Process.Start(new ProcessStartInfo
+                    {
+                        FileName = setupPath,
+                        Arguments = "/reinstall",
+                        UseShellExecute = true
+                    });
+                }
+                else
+                {
+                    MessageBox.Show(
+                        "Setup & Maintenance Wizard (BedrockServerManager-Setup.exe) was not found in your application directory.\n\nYou can download it directly from GitHub Releases or run the installer to repair/uninstall.",
+                        "Setup Wizard Not Found",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Information
+                    );
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("Could not launch Setup Wizard: " + ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
         }
 
         private void ExitApplication()

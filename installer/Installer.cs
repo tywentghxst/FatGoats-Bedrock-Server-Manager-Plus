@@ -127,6 +127,16 @@ namespace BedrockServerManager.Installer
             this.Controls.Add(lblFolderPrompt);
 
             string defaultPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Programs", "BedrockServerManager");
+            try
+            {
+                string currentDir = AppDomain.CurrentDomain.BaseDirectory.TrimEnd('\\', '/');
+                if (File.Exists(Path.Combine(currentDir, "BedrockServerManager.exe")) || File.Exists(Path.Combine(currentDir, "server", "index.js")))
+                {
+                    defaultPath = currentDir;
+                }
+            }
+            catch { }
+
             txtInstallDir = new TextBox();
             txtInstallDir.Text = defaultPath;
             txtInstallDir.Location = new Point(24, 116);
@@ -380,12 +390,17 @@ namespace BedrockServerManager.Installer
 
         private void Log(string message)
         {
-            if (this.InvokeRequired)
+            try
             {
-                this.Invoke(new Action<string>(Log), message);
-                return;
+                if (this.IsDisposed || !this.IsHandleCreated) return;
+                if (this.InvokeRequired)
+                {
+                    this.BeginInvoke(new Action<string>(Log), message);
+                    return;
+                }
+                txtLog.AppendText(string.Format("[{0:HH:mm:ss}] {1}\r\n", DateTime.Now, message));
             }
-            txtLog.AppendText(string.Format("[{0:HH:mm:ss}] {1}\r\n", DateTime.Now, message));
+            catch { }
         }
 
         private void BtnAction_Click(object sender, EventArgs e)
@@ -439,13 +454,17 @@ namespace BedrockServerManager.Installer
 
         private void Worker_ProgressChanged(object sender, ProgressChangedEventArgs e)
         {
-            progressBar.Value = Math.Min(100, Math.Max(0, e.ProgressPercentage));
-            if (e.UserState != null)
+            try
             {
-                string msg = e.UserState.ToString();
-                lblStatus.Text = msg;
-                Log(msg);
+                progressBar.Value = Math.Min(100, Math.Max(0, e.ProgressPercentage));
+                if (e.UserState != null)
+                {
+                    string msg = e.UserState.ToString();
+                    lblStatus.Text = msg;
+                    Log(msg);
+                }
             }
+            catch { }
         }
 
         private class NodeInfo
@@ -459,13 +478,17 @@ namespace BedrockServerManager.Installer
         {
             try
             {
+                int currentPid = Process.GetCurrentProcess().Id;
                 Process[] procs = Process.GetProcesses();
                 foreach (Process p in procs)
                 {
                     try
                     {
+                        if (p.Id == currentPid) continue; // CRITICAL: NEVER KILL OURSELVES
+
                         string name = p.ProcessName.ToLower();
-                        if (name.Contains("bedrockservermanager") || name.Contains("bedrock_server"))
+                        // Only kill tray manager and BDS, never the setup wizard
+                        if (name == "bedrockservermanager" || name.StartsWith("bedrock_server"))
                         {
                             p.Kill();
                             p.WaitForExit(2000);
@@ -473,8 +496,46 @@ namespace BedrockServerManager.Installer
                     }
                     catch { }
                 }
+
+                // Stop node backend processes if running our server
+                try
+                {
+                    ProcessStartInfo psi = new ProcessStartInfo
+                    {
+                        FileName = "powershell.exe",
+                        Arguments = "-NoProfile -Command \"Get-CimInstance Win32_Process -Filter \\\"name = 'node.exe'\\\" | Where-Object { $_.CommandLine -like '*server*index.js*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }\"",
+                        CreateNoWindow = true,
+                        UseShellExecute = false
+                    };
+                    using (Process ps = Process.Start(psi))
+                    {
+                        if (ps != null) ps.WaitForExit(3000);
+                    }
+                }
+                catch { }
             }
             catch { }
+        }
+
+        private void ExtractZipArchiveSafely(string zipPath, string destDir)
+        {
+            if (!Directory.Exists(destDir)) Directory.CreateDirectory(destDir);
+            using (ZipArchive archive = ZipFile.OpenRead(zipPath))
+            {
+                foreach (ZipArchiveEntry entry in archive.Entries)
+                {
+                    string fullPath = Path.Combine(destDir, entry.FullName);
+                    string dir = Path.GetDirectoryName(fullPath);
+                    if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
+                    {
+                        Directory.CreateDirectory(dir);
+                    }
+                    if (!string.IsNullOrEmpty(entry.Name))
+                    {
+                        entry.ExtractToFile(fullPath, true);
+                    }
+                }
+            }
         }
 
         private NodeInfo ResolveOrInstallNode(string targetDir)
@@ -530,7 +591,7 @@ namespace BedrockServerManager.Installer
 
             try
             {
-                ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12;
+                ServicePointManager.SecurityProtocol = (SecurityProtocolType)3072 | SecurityProtocolType.Tls;
                 using (WebClient client = new WebClient())
                 {
                     client.Headers.Add("User-Agent", "BedrockServerManager-Setup");
@@ -540,7 +601,7 @@ namespace BedrockServerManager.Installer
                 worker.ReportProgress(16, "Extracting bundled Node.js runtime...");
                 if (Directory.Exists(tempNodeExtract)) Directory.Delete(tempNodeExtract, true);
                 Directory.CreateDirectory(tempNodeExtract);
-                ZipFile.ExtractToDirectory(tempNodeZip, tempNodeExtract);
+                ExtractZipArchiveSafely(tempNodeZip, tempNodeExtract);
 
                 string[] subDirs = Directory.GetDirectories(tempNodeExtract);
                 string sourceNodeDir = subDirs.Length > 0 ? subDirs[0] : tempNodeExtract;
@@ -715,7 +776,7 @@ namespace BedrockServerManager.Installer
                 string tempZip = Path.Combine(Path.GetTempPath(), string.Format("bedrock-mgr-setup-{0}.zip", Environment.TickCount));
                 worker.ReportProgress(25, "Downloading latest repository package from GitHub...");
 
-                ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12;
+                ServicePointManager.SecurityProtocol = (SecurityProtocolType)3072 | SecurityProtocolType.Tls;
                 using (WebClient client = new WebClient())
                 {
                     client.Headers.Add("User-Agent", "BedrockServerManager-Setup");
@@ -727,7 +788,7 @@ namespace BedrockServerManager.Installer
                 if (Directory.Exists(tempExtract)) Directory.Delete(tempExtract, true);
                 Directory.CreateDirectory(tempExtract);
 
-                ZipFile.ExtractToDirectory(tempZip, tempExtract);
+                ExtractZipArchiveSafely(tempZip, tempExtract);
 
                 string[] innerDirs = Directory.GetDirectories(tempExtract);
                 string sourceRoot = innerDirs.Length > 0 ? innerDirs[0] : tempExtract;
@@ -836,84 +897,109 @@ namespace BedrockServerManager.Installer
 
         private void Worker_RunWorkerCompleted(object sender, RunWorkerCompletedEventArgs e)
         {
-            if (e.Error != null)
+            try
             {
-                lblStatus.Text = "Operation failed. See log for details.";
-                lblStatus.ForeColor = Color.FromArgb(239, 68, 68); // Red
-                btnAction.Text = "Retry";
                 btnAction.Enabled = true;
-                btnCancel.Text = "Close";
-                MessageBox.Show(string.Format("Setup encountered an error:\n\n{0}", e.Error.Message), "Operation Failed", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                return;
-            }
+                btnBrowse.Enabled = true;
+                txtInstallDir.ReadOnly = false;
+                grpActionMode.Enabled = true;
+                grpDataOptions.Enabled = true;
+                chkDesktopShortcut.Enabled = true;
+                chkStartMenuShortcut.Enabled = true;
+                chkLaunchAfter.Enabled = true;
 
-            OperationOptions opts = (OperationOptions)e.Result;
-            lblStatus.Text = "✓ Operation Completed Successfully!";
-            lblStatus.ForeColor = Color.FromArgb(52, 211, 153);
-            btnAction.Text = "✓ Finished";
-            btnCancel.Text = "Close";
-
-            if (opts.IsUninstall)
-            {
-                string msg = opts.KeepUserData
-                    ? "Bedrock Server Manager Plus was uninstalled.\n\nYour worlds, database records, and backups have been preserved in:\n" + opts.TargetDirectory
-                    : "Bedrock Server Manager Plus has been completely uninstalled and all data has been erased.";
-
-                MessageBox.Show(msg, "Uninstallation Complete", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                this.Close();
-                return;
-            }
-
-            if (opts.LaunchAfter)
-            {
-                string targetExe = Path.Combine(opts.TargetDirectory, "BedrockServerManager.exe");
-                if (File.Exists(targetExe))
+                if (e.Error != null)
                 {
-                    try
-                    {
-                        Process.Start(new ProcessStartInfo
-                        {
-                            FileName = targetExe,
-                            WorkingDirectory = opts.TargetDirectory,
-                            UseShellExecute = true
-                        });
-                    }
-                    catch { }
+                    lblStatus.Text = "Operation failed. See log for details.";
+                    lblStatus.ForeColor = Color.FromArgb(239, 68, 68); // Red
+                    btnAction.Text = "Retry";
+                    btnCancel.Text = "Close";
+                    MessageBox.Show(string.Format("Setup encountered an error:\n\n{0}", e.Error.Message), "Operation Failed", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    return;
                 }
+
+                OperationOptions opts = (OperationOptions)e.Result;
+                lblStatus.Text = "✓ Operation Completed Successfully!";
+                lblStatus.ForeColor = Color.FromArgb(52, 211, 153);
+                btnAction.Text = "✓ Finished";
+                btnCancel.Text = "Close";
+
+                if (opts.IsUninstall)
+                {
+                    string msg = opts.KeepUserData
+                        ? "Bedrock Server Manager Plus was uninstalled.\n\nYour worlds, database records, and backups have been preserved in:\n" + opts.TargetDirectory
+                        : "Bedrock Server Manager Plus has been completely uninstalled and all data has been erased.";
+
+                    MessageBox.Show(msg, "Uninstallation Complete", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    this.Close();
+                    return;
+                }
+
+                if (opts.LaunchAfter)
+                {
+                    string targetExe = Path.Combine(opts.TargetDirectory, "BedrockServerManager.exe");
+                    if (File.Exists(targetExe))
+                    {
+                        try
+                        {
+                            Process.Start(new ProcessStartInfo
+                            {
+                                FileName = targetExe,
+                                WorkingDirectory = opts.TargetDirectory,
+                                UseShellExecute = true
+                            });
+                        }
+                        catch { }
+                    }
+                }
+
+                MessageBox.Show("Bedrock Server Manager Plus has been successfully configured!\n\nThe tray launcher is now running in your Windows system tray overflow area, and your web browser will open to the dashboard.",
+                    "Setup Complete", MessageBoxButtons.OK, MessageBoxIcon.Information);
+
+                this.Close();
             }
-
-            MessageBox.Show("Bedrock Server Manager Plus has been successfully configured!\n\nThe tray launcher is now running in your Windows system tray overflow area, and your web browser will open to the dashboard.",
-                "Setup Complete", MessageBoxButtons.OK, MessageBoxIcon.Information);
-
-            this.Close();
+            catch (Exception ex)
+            {
+                MessageBox.Show("Error completing operation: " + ex.Message, "Setup Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
         }
 
         private void ExecuteProcessWithEnv(string exe, string args, string workingDir, string prependPath)
         {
-            ProcessStartInfo psi = new ProcessStartInfo
+            try
             {
-                FileName = exe,
-                Arguments = args,
-                WorkingDirectory = workingDir,
-                UseShellExecute = false,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                CreateNoWindow = true
-            };
+                ProcessStartInfo psi = new ProcessStartInfo
+                {
+                    FileName = exe,
+                    Arguments = args,
+                    WorkingDirectory = workingDir,
+                    UseShellExecute = false,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    CreateNoWindow = true
+                };
 
-            if (!string.IsNullOrEmpty(prependPath))
-            {
-                string currentPath = Environment.GetEnvironmentVariable("PATH") ?? "";
-                psi.EnvironmentVariables["PATH"] = prependPath + ";" + currentPath;
+                if (!string.IsNullOrEmpty(prependPath))
+                {
+                    string currentPath = Environment.GetEnvironmentVariable("PATH") ?? "";
+                    psi.EnvironmentVariables["PATH"] = prependPath + ";" + currentPath;
+                }
+
+                using (Process p = Process.Start(psi))
+                {
+                    if (p != null)
+                    {
+                        p.OutputDataReceived += (s, ev) => { if (!string.IsNullOrEmpty(ev.Data)) Log(ev.Data); };
+                        p.ErrorDataReceived += (s, ev) => { if (!string.IsNullOrEmpty(ev.Data)) Log(ev.Data); };
+                        p.BeginOutputReadLine();
+                        p.BeginErrorReadLine();
+                        p.WaitForExit(300000); // 5 minutes timeout
+                    }
+                }
             }
-
-            using (Process p = Process.Start(psi))
+            catch (Exception ex)
             {
-                p.OutputDataReceived += (s, ev) => { if (!string.IsNullOrEmpty(ev.Data)) Log(ev.Data); };
-                p.ErrorDataReceived += (s, ev) => { if (!string.IsNullOrEmpty(ev.Data)) Log(ev.Data); };
-                p.BeginOutputReadLine();
-                p.BeginErrorReadLine();
-                p.WaitForExit(300000); // 5 minutes timeout
+                Log(string.Format("Notice executing {0}: {1}", exe, ex.Message));
             }
         }
 
@@ -948,16 +1034,36 @@ namespace BedrockServerManager.Installer
 
             foreach (string file in Directory.GetFiles(sourceDir))
             {
-                string destFile = Path.Combine(targetDir, Path.GetFileName(file));
-                File.Copy(file, destFile, true);
+                try
+                {
+                    string fileName = Path.GetFileName(file);
+                    // Do not attempt to overwrite ourselves if running!
+                    if (fileName.Equals("BedrockServerManager-Setup.exe", StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+                    string destFile = Path.Combine(targetDir, fileName);
+                    File.Copy(file, destFile, true);
+                }
+                catch (Exception ex)
+                {
+                    Log(string.Format("Notice copying file {0}: {1}", Path.GetFileName(file), ex.Message));
+                }
             }
 
             foreach (string dir in Directory.GetDirectories(sourceDir))
             {
-                string dirName = Path.GetFileName(dir);
-                if (dirName.Equals(".git", StringComparison.OrdinalIgnoreCase)) continue;
-                string destDir = Path.Combine(targetDir, dirName);
-                CopyDirectoryRecursive(dir, destDir);
+                try
+                {
+                    string dirName = Path.GetFileName(dir);
+                    if (dirName.Equals(".git", StringComparison.OrdinalIgnoreCase)) continue;
+                    string destDir = Path.Combine(targetDir, dirName);
+                    CopyDirectoryRecursive(dir, destDir);
+                }
+                catch (Exception ex)
+                {
+                    Log(string.Format("Notice copying directory {0}: {1}", Path.GetFileName(dir), ex.Message));
+                }
             }
         }
 
@@ -987,9 +1093,28 @@ namespace BedrockServerManager.Installer
         [STAThread]
         public static void Main(string[] args)
         {
-            Application.EnableVisualStyles();
-            Application.SetCompatibleTextRenderingDefault(false);
-            Application.Run(new InstallerForm(args));
+            try
+            {
+                Application.EnableVisualStyles();
+                Application.SetCompatibleTextRenderingDefault(false);
+
+                Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
+                AppDomain.CurrentDomain.UnhandledException += (s, e) =>
+                {
+                    Exception ex = e.ExceptionObject as Exception;
+                    MessageBox.Show("Fatal Error in Setup Wizard:\n\n" + (ex != null ? ex.ToString() : "Unknown error"), "Setup Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                };
+                Application.ThreadException += (s, e) =>
+                {
+                    MessageBox.Show("Error in Setup Wizard:\n\n" + e.Exception.ToString(), "Setup Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                };
+
+                Application.Run(new InstallerForm(args));
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("Could not initialize Setup Wizard:\n\n" + ex.ToString(), "Fatal Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
         }
     }
 

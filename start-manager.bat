@@ -18,35 +18,35 @@ if %ERRORLEVEL% neq 0 (
     exit /b 1
 )
 
-:: 2. Check if server dependencies exist
+:: 2. Launch native Windows Tray Launcher (with GUI setup & progress bar)
+if exist "%~dp0BedrockServerManager.exe" (
+    echo Launching native Windows Launcher (BedrockServerManager.exe)...
+    echo The app will sit in your Windows Taskbar Overflow Tray.
+    echo Web Dashboard: http://localhost:3001
+    echo.
+    start "" "%~dp0BedrockServerManager.exe"
+    exit /b 0
+)
+
+:: 3. CLI Fallback if BedrockServerManager.exe is not present
 if not exist "node_modules\" (
     echo [First-Time Setup] Installing server dependencies from package.json...
-    echo Please wait a moment while packages are downloaded...
     call npm install --omit=dev --no-audit --no-fund
     if %ERRORLEVEL% neq 0 (
-        echo [ERROR] Failed to install dependencies. Please run 'npm install' manually.
+        echo [ERROR] Failed to install dependencies.
         pause
         exit /b 1
     )
-    echo [Setup] Server dependencies installed successfully!
-    echo.
 )
 
-:: 3. Check if pre-built client dashboard exists
 if not exist "client\dist\index.html" (
     echo [First-Time Setup] Building web dashboard assets...
     cd client
     if not exist "node_modules\" call npm install --no-audit --no-fund
     call npm run build
     cd ..
-    echo [Setup] Dashboard assets compiled successfully!
-    echo.
 )
 
-:: 4. Launch Native Windows Launcher
-echo Launching native Windows Launcher (BedrockServerManager.exe)...
-echo The app will sit in your Windows Taskbar Overflow Tray.
-echo Web Dashboard: http://localhost:3001
-echo.
-start "" "%~dp0BedrockServerManager.exe"
-exit
+echo Starting Bedrock Server Manager...
+start http://localhost:3001
+node server/index.js

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import api from '../api';
+import AppUpdateModal from './AppUpdateModal';
 
 export const Layout = () => {
   const { user, logout, isAdmin } = useAuth();
@@ -12,6 +13,8 @@ export const Layout = () => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [actionLoading, setActionLoading] = useState(null); // 'start-all' | 'restart-all' | 'stop-all'
   const [actionToast, setActionToast] = useState(null);
+  const [updateInfo, setUpdateInfo] = useState(null);
+  const [showUpdateModal, setShowUpdateModal] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -53,6 +56,26 @@ export const Layout = () => {
     return () => {
       isMounted = false;
       clearInterval(interval);
+    };
+  }, []);
+
+  // Auto-check GitHub for app updates on launch
+  useEffect(() => {
+    let isMounted = true;
+    const checkAppUpdates = async () => {
+      try {
+        const info = await api.Updates.getStatus(true);
+        if (isMounted && info) {
+          setUpdateInfo(info);
+          if (info.shouldPrompt) {
+            setShowUpdateModal(true);
+          }
+        }
+      } catch (_) {}
+    };
+    checkAppUpdates();
+    return () => {
+      isMounted = false;
     };
   }, []);
 
@@ -398,6 +421,18 @@ export const Layout = () => {
 
           <div className="header-right">
             <div className="header-user-actions">
+              {updateInfo?.updateAvailable && (
+                <button
+                  type="button"
+                  className="btn btn-warning btn-xs font-bold d-flex items-center gap-1.5 px-3 py-1.5 rounded-full"
+                  onClick={() => setShowUpdateModal(true)}
+                  title={`Update available: ${updateInfo.commitsBehind} new commit(s)`}
+                  style={{ boxShadow: '0 0 10px rgba(245, 158, 11, 0.4)' }}
+                >
+                  <span>🚀</span>
+                  <span>Update Available ({updateInfo.commitsBehind})</span>
+                </button>
+              )}
               <span className="user-pill-chip">
                 <span className="chip-avatar">{user?.username?.[0]?.toUpperCase() || 'A'}</span>
                 <span className="chip-name">{user?.username}</span>
@@ -409,6 +444,16 @@ export const Layout = () => {
             </div>
           </div>
         </header>
+
+        {showUpdateModal && updateInfo && (
+          <AppUpdateModal
+            updateInfo={updateInfo}
+            onClose={() => setShowUpdateModal(false)}
+            onUpdateSuccess={() => {
+              api.Updates.getStatus(false).then((info) => setUpdateInfo(info)).catch(() => {});
+            }}
+          />
+        )}
 
         {actionToast && (
           <div className={`header-action-toast toast-${actionToast.type}`}>

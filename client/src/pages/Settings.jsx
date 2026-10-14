@@ -27,7 +27,13 @@ export const Settings = () => {
   const [systemLoading, setSystemLoading] = useState(true);
   const [serverStatus, setServerStatus] = useState(null);
 
-  // Active Settings Tab ('portal' | 'automation' | 'admin' | 'all')
+  // App GitHub Updates state
+  const [updateStatus, setUpdateStatus] = useState(null);
+  const [checkingUpdates, setCheckingUpdates] = useState(false);
+  const [updatingApp, setUpdatingApp] = useState(false);
+  const [autoCheckAppUpdates, setAutoCheckAppUpdates] = useState(true);
+
+  // Active Settings Tab ('portal' | 'automation' | 'admin' | 'updates' | 'all')
   const [activeTab, setActiveTab] = useState('portal');
 
   // Default Portal Sections
@@ -61,15 +67,21 @@ export const Settings = () => {
     const loadSystemSettings = async () => {
       setSystemLoading(true);
       try {
-        const [vSettings, bSettings, sStatus, pConfig] = await Promise.allSettled([
+        const [vSettings, bSettings, sStatus, pConfig, uStatus] = await Promise.allSettled([
           api.Versions.getSettings(),
           api.Backups.getSettings(),
           api.Server.getStatus(),
           api.Portal.getConfig(),
+          api.Updates.getStatus(false),
         ]);
 
         if (vSettings.status === 'fulfilled' && vSettings.value) {
           setAutoUpdateServer(Boolean(vSettings.value.autoUpdate));
+        }
+
+        if (uStatus.status === 'fulfilled' && uStatus.value) {
+          setUpdateStatus(uStatus.value);
+          setAutoCheckAppUpdates(Boolean(uStatus.value.autoCheck));
         }
 
         if (bSettings.status === 'fulfilled' && bSettings.value) {
@@ -211,6 +223,68 @@ export const Settings = () => {
     }
   };
 
+  const handleCheckUpdates = async () => {
+    setCheckingUpdates(true);
+    try {
+      const res = await api.Updates.check();
+      setUpdateStatus(res);
+      setAutoCheckAppUpdates(Boolean(res.autoCheck));
+      setCredToast({
+        type: res.updateAvailable ? 'info' : 'success',
+        text: res.updateAvailable
+          ? `🚀 Update available! ${res.commitsBehind} new commit(s) found on GitHub.`
+          : '✓ App is up to date! You are running the latest version from GitHub.',
+      });
+    } catch (err) {
+      setCredToast({ type: 'error', text: err.message || 'Failed to check GitHub for updates.' });
+    } finally {
+      setCheckingUpdates(false);
+    }
+  };
+
+  const handleToggleAutoCheck = async (val) => {
+    setAutoCheckAppUpdates(val);
+    try {
+      await api.Updates.setPreferences({ autoCheck: val });
+      setCredToast({
+        type: 'success',
+        text: `Auto-check GitHub for updates on launch ${val ? 'Enabled' : 'Disabled'}!`,
+      });
+    } catch (err) {
+      setAutoCheckAppUpdates(!val);
+      setCredToast({ type: 'error', text: 'Failed to save auto-check setting.' });
+    }
+  };
+
+  const handleApplyAppUpdate = async () => {
+    if (!window.confirm('Apply latest updates from GitHub? All worlds, databases, player data, and configurations are 100% preserved.')) return;
+    setUpdatingApp(true);
+    try {
+      const res = await api.Updates.apply();
+      setCredToast({
+        type: 'success',
+        text: `✓ ${res.message || 'App successfully updated!'} Please reload the page to load new assets.`,
+      });
+      const fresh = await api.Updates.getStatus(false);
+      setUpdateStatus(fresh);
+    } catch (err) {
+      setCredToast({ type: 'error', text: err.message || 'Failed to apply app update.' });
+    } finally {
+      setUpdatingApp(false);
+    }
+  };
+
+  const handleResetIgnored = async () => {
+    try {
+      await api.Updates.setPreferences({ ignoredCommit: '', clearSnooze: true });
+      const fresh = await api.Updates.getStatus(true);
+      setUpdateStatus(fresh);
+      setCredToast({ type: 'success', text: 'Reset ignored updates. Notifications restored.' });
+    } catch (err) {
+      setCredToast({ type: 'error', text: 'Failed to reset ignored updates.' });
+    }
+  };
+
   const handleChangeBackupFrequency = async (freq) => {
     const fNum = parseFloat(freq);
     setBackupFrequency(fNum);
@@ -329,6 +403,17 @@ export const Settings = () => {
         >
           <span className="tab-icon">🔐</span>
           <span>Admin Credentials</span>
+        </button>
+        <button
+          type="button"
+          className={`settings-tab-btn ${activeTab === 'updates' ? 'active' : ''}`}
+          onClick={() => setActiveTab('updates')}
+        >
+          <span className="tab-icon">🚀</span>
+          <span>App Updates &amp; GitHub Sync</span>
+          {updateStatus?.updateAvailable && (
+            <span className="badge badge-warning text-2xs ml-1.5 px-1.5 py-0.5">NEW</span>
+          )}
         </button>
         <button
           type="button"
@@ -954,6 +1039,178 @@ export const Settings = () => {
             </form>
           </div>
         </div>
+        )}
+
+        {/* CARD 4: APP VERSION & GITHUB SYNCHRONIZATION */}
+        {(activeTab === 'updates' || activeTab === 'all') && (
+          <div className="modern-card settings-card">
+            <div className="card-header-styled">
+              <div className="header-badge-title">
+                <span className="icon-badge">🚀</span>
+                <h2>App Version &amp; GitHub Updates</h2>
+              </div>
+              <span className="header-meta">Sync engine with GitHub repository</span>
+            </div>
+
+            <div className="card-body p-5">
+              {/* Repository info banner */}
+              <div className="user-profile-summary-box mb-5">
+                <div className="profile-avatar" style={{ background: 'linear-gradient(135deg, #24292e, #0d1117)', border: '1px solid rgba(255, 255, 255, 0.15)' }}>
+                  🐙
+                </div>
+                <div className="profile-info flex-1">
+                  <div className="profile-name-row d-flex items-center justify-between flex-wrap gap-2">
+                    <div>
+                      <span className="profile-name">FatGoats Bedrock Server Manager+</span>
+                      <span className="badge badge-primary font-mono text-xs ml-2">
+                        #{updateStatus?.currentCommit || 'local'}
+                      </span>
+                    </div>
+                    <a
+                      href="https://github.com/tywentghxst/FatGoats-Bedrock-Server-Manager-Plus"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="btn btn-secondary btn-xs font-mono"
+                    >
+                      🔗 Open GitHub Repo ↗
+                    </a>
+                  </div>
+                  <span className="profile-sub d-block mt-1">
+                    Branch: <strong>main</strong> &bull; Remote: <code>origin</code> &bull; Last Checked: {updateStatus?.lastChecked ? new Date(updateStatus.lastChecked).toLocaleString() : 'Never'}
+                  </span>
+                </div>
+              </div>
+
+              {/* Status Display */}
+              <div className="mb-4">
+                {updateStatus?.updateAvailable ? (
+                  <div className="p-4 rounded-xl mb-4" style={{ background: 'rgba(245, 158, 11, 0.1)', border: '1px solid rgba(245, 158, 11, 0.3)' }}>
+                    <div className="d-flex items-center justify-between flex-wrap gap-2 mb-2">
+                      <div className="d-flex items-center gap-2">
+                        <span className="text-xl">🚀</span>
+                        <strong className="text-white text-base">New Version Available on GitHub!</strong>
+                      </div>
+                      <span className="badge badge-warning font-bold text-xs">
+                        {updateStatus.commitsBehind} New Commit{updateStatus.commitsBehind !== 1 ? 's' : ''}
+                      </span>
+                    </div>
+
+                    <div className="font-mono text-xs text-sub mb-3 p-2.5 rounded bg-darker">
+                      Latest Remote Commit: <strong className="text-emerald">#{updateStatus.remoteCommit}</strong>
+                      {updateStatus.remoteCommitDate && <span> ({updateStatus.remoteCommitDate})</span>}
+                      <br />
+                      <span className="text-white font-sans mt-1 d-block font-medium">
+                        "{updateStatus.remoteCommitSubject}"
+                      </span>
+                    </div>
+
+                    {updateStatus.changelog && updateStatus.changelog.length > 0 && (
+                      <div className="mb-3">
+                        <span className="text-2xs text-sub uppercase font-semibold mb-1 d-block">Recent Commits:</span>
+                        <div className="max-h-36 overflow-y-auto bg-darker p-2.5 rounded text-xs space-y-1 font-mono">
+                          {updateStatus.changelog.map((c, idx) => (
+                            <div key={idx} className="d-flex items-baseline gap-2">
+                              <span className="text-emerald text-2xs">#{c.hash}</span>
+                              <span className="text-white font-sans text-xs truncate flex-1">{c.subject}</span>
+                              <span className="text-sub text-2xs shrink-0 font-sans">{c.date}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="d-flex items-center justify-between flex-wrap gap-3">
+                      <button
+                        type="button"
+                        className="btn btn-primary font-bold px-4 py-2"
+                        onClick={handleApplyAppUpdate}
+                        disabled={updatingApp || !isAdmin}
+                      >
+                        {updatingApp ? 'Applying Update (zero data loss)...' : '🚀 Update App Now (Zero Data Loss)'}
+                      </button>
+
+                      {updateStatus.isIgnored && (
+                        <button
+                          type="button"
+                          className="btn btn-secondary btn-xs"
+                          onClick={handleResetIgnored}
+                        >
+                          Reset Ignored Version
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="p-4 rounded-xl mb-4 d-flex items-center justify-between flex-wrap gap-3" style={{ background: 'rgba(16, 185, 129, 0.08)', border: '1px solid rgba(16, 185, 129, 0.25)' }}>
+                    <div className="d-flex items-center gap-3">
+                      <span className="text-2xl">✓</span>
+                      <div>
+                        <strong className="text-white text-sm d-block">App is Up to Date</strong>
+                        <span className="text-sub text-xs">
+                          You are currently running the latest commits from the main branch.
+                        </span>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm font-semibold"
+                      onClick={handleCheckUpdates}
+                      disabled={checkingUpdates}
+                    >
+                      {checkingUpdates ? 'Checking GitHub...' : '🔄 Check for Updates'}
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* Auto-check setting toggle */}
+              <div className="automation-setting-row d-flex items-center justify-between p-3 rounded mb-4" style={{ background: 'rgba(255, 255, 255, 0.02)', border: '1px solid rgba(255, 255, 255, 0.06)' }}>
+                <div className="setting-info mr-3">
+                  <label className="field-label-bold mb-1 d-block text-sm">
+                    Auto-Check GitHub for Updates on App Launch
+                  </label>
+                  <p className="field-hint text-sub text-xs m-0">
+                    Automatically checks GitHub whenever the dashboard is opened and prompts you with options to <strong>Update</strong>, <strong>Ignore</strong>, or <strong>Ask Again Later</strong>.
+                  </p>
+                </div>
+                <label className="switch-toggle shrink-0">
+                  <input
+                    type="checkbox"
+                    checked={autoCheckAppUpdates}
+                    onChange={(e) => handleToggleAutoCheck(e.target.checked)}
+                    disabled={!isAdmin}
+                  />
+                  <span className="switch-slider" />
+                </label>
+              </div>
+
+              {/* Zero Data Loss Guarantee Callout */}
+              <div className="p-4 rounded-xl" style={{ background: 'rgba(16, 185, 129, 0.06)', border: '1px solid rgba(16, 185, 129, 0.2)' }}>
+                <div className="d-flex items-center gap-2 text-emerald font-bold text-sm mb-1">
+                  <span>🛡️</span>
+                  <span>Zero Data Loss Guarantee</span>
+                </div>
+                <p className="text-sub text-xs m-0">
+                  App updates pull exclusively source code improvements and web assets. Your SQLite database (<code>manager.db</code>), Minecraft worlds, player stats, world backups, custom addons, and login credentials are permanently preserved and will never be overwritten or deleted.
+                </p>
+              </div>
+
+              {/* Manual Check Button Bar */}
+              <div className="mt-4 d-flex justify-between items-center flex-wrap gap-2">
+                <span className="text-sub text-xs">
+                  {updateStatus?.lastChecked && `Last checked: ${new Date(updateStatus.lastChecked).toLocaleTimeString()}`}
+                </span>
+                <button
+                  type="button"
+                  className="btn btn-secondary font-bold px-4 py-2"
+                  onClick={handleCheckUpdates}
+                  disabled={checkingUpdates}
+                >
+                  {checkingUpdates ? 'Connecting to GitHub...' : '🔄 Check for App Updates'}
+                </button>
+              </div>
+            </div>
+          </div>
         )}
       </div>
     </div>

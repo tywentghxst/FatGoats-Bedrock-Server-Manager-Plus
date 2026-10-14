@@ -171,6 +171,7 @@ namespace BedrockServerManager.Tray
             menuOpenServer = new ToolStripMenuItem("🌐 Open Server", null, (s, e) => Program.OpenBrowser(Program.DashboardUrl));
             menuOpenServer.Font = new Font(contextMenu.Font, FontStyle.Bold);
             contextMenu.Items.Add(menuOpenServer);
+            contextMenu.Items.Add(new ToolStripMenuItem("🚀 Check for App Updates", null, (s, e) => Program.OpenBrowser(Program.DashboardUrl + "/settings")));
 
             contextMenu.Items.Add(new ToolStripSeparator());
 

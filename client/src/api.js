@@ -214,6 +214,13 @@ export const Tunnel = {
   updateConfig: (config) => request('PUT', '/api/tunnel/config', config),
 };
 
+export const Updates = {
+  getStatus: (forceFetch = false) => request('GET', `/api/updates/status${forceFetch ? '?fetch=true' : ''}`),
+  check: () => request('POST', '/api/updates/check'),
+  setPreferences: (prefs) => request('POST', '/api/updates/preferences', prefs),
+  apply: () => request('POST', '/api/updates/apply'),
+};
+
 const api = {
   setToken,
   getToken,
@@ -235,6 +242,7 @@ const api = {
   Portal,
   Xbox,
   Tunnel,
+  Updates,
 
   // Top-level aliases for flexibility
   login: Auth.login,

@@ -78,6 +78,7 @@ async function main() {
   registerRoute('/api/xbox',       './routes/xbox');
   registerRoute('/api/tunnel',     './routes/tunnel');
   registerRoute('/api/tray',       './routes/tray');
+  registerRoute('/api/updates',    './routes/updates');
 
   // Start auto-backup scheduler
   const backupService = require('./services/backupService');

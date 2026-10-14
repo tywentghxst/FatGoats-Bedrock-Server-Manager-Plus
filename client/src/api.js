@@ -219,6 +219,7 @@ export const Updates = {
   check: () => request('POST', '/api/updates/check'),
   setPreferences: (prefs) => request('POST', '/api/updates/preferences', prefs),
   apply: () => request('POST', '/api/updates/apply'),
+  getProgress: () => request('GET', '/api/updates/progress'),
 };
 
 const api = {

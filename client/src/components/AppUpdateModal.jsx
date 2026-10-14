@@ -1,16 +1,43 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import api from '../api';
+import UpdateProgressBar from './UpdateProgressBar';
 
 export const AppUpdateModal = ({ updateInfo, onClose, onUpdateSuccess }) => {
   const [updating, setUpdating] = useState(false);
   const [error, setError] = useState(null);
   const [successResult, setSuccessResult] = useState(null);
+  const [liveProgress, setLiveProgress] = useState(null);
+  const pollTimerRef = useRef(null);
 
   if (!updateInfo || !updateInfo.updateAvailable) return null;
+
+  // Poll progress while updating
+  useEffect(() => {
+    if (updating) {
+      pollTimerRef.current = setInterval(async () => {
+        try {
+          const p = await api.Updates.getProgress();
+          if (p) setLiveProgress(p);
+        } catch (_) {}
+      }, 500);
+    } else {
+      if (pollTimerRef.current) clearInterval(pollTimerRef.current);
+    }
+    return () => {
+      if (pollTimerRef.current) clearInterval(pollTimerRef.current);
+    };
+  }, [updating]);
 
   const handleUpdateNow = async () => {
     setUpdating(true);
     setError(null);
+    setLiveProgress({
+      stage: 1,
+      progressPercent: 10,
+      stageName: 'Initializing update',
+      details: 'Connecting to update engine...',
+    });
+
     try {
       const res = await api.Updates.apply();
       setSuccessResult(res);
@@ -38,7 +65,7 @@ export const AppUpdateModal = ({ updateInfo, onClose, onUpdateSuccess }) => {
 
   return (
     <div className="modal-overlay" onClick={() => !updating && onClose()}>
-      <div className="modal app-update-modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 540 }}>
+      <div className="modal app-update-modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 580 }}>
         <div className="modal-header d-flex justify-between items-center">
           <div className="d-flex items-center gap-2">
             <span className="text-xl">🚀</span>
@@ -57,11 +84,11 @@ export const AppUpdateModal = ({ updateInfo, onClose, onUpdateSuccess }) => {
               <div className="text-4xl mb-2">🎉</div>
               <h4 className="text-white font-bold text-lg mb-1">Update Installed Successfully!</h4>
               <p className="text-sub text-sm mb-4">
-                The application has been safely updated to commit <strong>#{successResult.newCommit || updateInfo.remoteCommit}</strong>. All worlds, database records, and settings were preserved.
+                The application has been safely updated to commit <strong>#{successResult.newCommit || updateInfo.remoteCommit}</strong>. All worlds, database records, custom addons, and configurations were 100% preserved.
               </p>
               <button
                 type="button"
-                className="btn btn-primary font-bold px-5 py-2.5"
+                className="btn btn-primary font-bold px-6 py-2.5"
                 onClick={() => window.location.reload()}
               >
                 🔄 Reload App Now
@@ -124,26 +151,21 @@ export const AppUpdateModal = ({ updateInfo, onClose, onUpdateSuccess }) => {
                 </div>
               )}
 
-              {/* Data Safety Guarantee Shield */}
-              <div className="p-3 rounded mb-4" style={{ background: 'rgba(16, 185, 129, 0.08)', border: '1px solid rgba(16, 185, 129, 0.25)' }}>
-                <div className="d-flex items-center gap-2 text-emerald font-semibold text-xs mb-0.5">
-                  <span>🛡️</span>
-                  <span>Zero Data Loss Protection</span>
+              {/* Multi-Step Real-time Progress Bar when Updating */}
+              {updating ? (
+                <div className="p-4 rounded-xl mb-4" style={{ background: 'rgba(15, 23, 42, 0.7)', border: '1px solid rgba(6, 182, 212, 0.3)' }}>
+                  <UpdateProgressBar progress={liveProgress} />
                 </div>
-                <p className="text-sub text-xs m-0" style={{ fontSize: '0.72rem' }}>
-                  Updating pulls only source code changes. Your database, active worlds, player inventories, backups, custom addons, and login credentials are never touched.
-                </p>
-              </div>
-
-              {updating && (
-                <div className="text-center p-3 mb-2">
-                  <div className="spinner mb-2"></div>
-                  <span className="text-white text-xs font-semibold d-block">
-                    Pulling repository changes and rebuilding application...
-                  </span>
-                  <span className="text-sub text-2xs mt-1 d-block">
-                    This takes about 10-20 seconds. Please do not close the window.
-                  </span>
+              ) : (
+                /* Data Safety Guarantee Shield */
+                <div className="p-3 rounded mb-4" style={{ background: 'rgba(16, 185, 129, 0.08)', border: '1px solid rgba(16, 185, 129, 0.25)' }}>
+                  <div className="d-flex items-center gap-2 text-emerald font-semibold text-xs mb-0.5">
+                    <span>🛡️</span>
+                    <span>Zero Data Loss Protection</span>
+                  </div>
+                  <p className="text-sub text-xs m-0" style={{ fontSize: '0.72rem' }}>
+                    Updating pulls only source code changes. Your database, active worlds, player inventories, backups, custom addons, and login credentials are never touched.
+                  </p>
                 </div>
               )}
             </>
@@ -175,11 +197,11 @@ export const AppUpdateModal = ({ updateInfo, onClose, onUpdateSuccess }) => {
 
             <button
               type="button"
-              className="btn btn-primary btn-sm font-bold px-4"
+              className="btn btn-primary btn-sm font-bold px-5"
               onClick={handleUpdateNow}
               disabled={updating}
             >
-              {updating ? 'Updating App...' : '🚀 Update Now'}
+              {updating ? 'Applying Update...' : '🚀 Update Now'}
             </button>
           </div>
         )}

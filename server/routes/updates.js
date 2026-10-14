@@ -23,6 +23,14 @@ router.get('/status', async (req, res) => {
 });
 
 /**
+ * GET /progress
+ * Retrieve real-time multi-stage update progress.
+ */
+router.get('/progress', (req, res) => {
+  return res.json(appUpdateService.getProgress());
+});
+
+/**
  * POST /check
  * Force fetch origin and return fresh update status.
  */

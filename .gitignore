@@ -17,6 +17,7 @@ bds/resource_packs/*
 # Local database, uploads, and backups
 data/db/*.db
 data/db/*.db-journal
+data/db/*.bak
 data/backups/*
 !data/backups/.gitkeep
 data/uploads/*

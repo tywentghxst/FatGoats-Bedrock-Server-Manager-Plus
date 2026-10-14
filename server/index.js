@@ -9,6 +9,10 @@ async function main() {
   // ---- Initialise database (async – loads WASM engine) ----
   await db.init();
 
+  // ---- Sync & safeguard installed custom addons ----
+  const addonService = require('./services/addonService');
+  addonService.syncSystemPacksFlag();
+
   // ---- Initialise server process manager ----
   const serverProcess = require('./services/serverProcess');
 

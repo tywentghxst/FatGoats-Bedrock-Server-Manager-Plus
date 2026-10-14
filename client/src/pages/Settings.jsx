@@ -1,6 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import api from '../api';
 import { useAuth } from '../context/AuthContext';
+import UpdateProgressBar from '../components/UpdateProgressBar';
 
 export const Settings = () => {
   const { user, updateCredentials, isAdmin } = useAuth();
@@ -32,6 +33,8 @@ export const Settings = () => {
   const [checkingUpdates, setCheckingUpdates] = useState(false);
   const [updatingApp, setUpdatingApp] = useState(false);
   const [autoCheckAppUpdates, setAutoCheckAppUpdates] = useState(true);
+  const [liveUpdateProgress, setLiveUpdateProgress] = useState(null);
+  const updatePollRef = useRef(null);
 
   // Active Settings Tab ('portal' | 'automation' | 'admin' | 'updates' | 'all')
   const [activeTab, setActiveTab] = useState('portal');
@@ -256,9 +259,33 @@ export const Settings = () => {
     }
   };
 
+  // Poll update progress when updatingApp is true
+  useEffect(() => {
+    if (updatingApp) {
+      updatePollRef.current = setInterval(async () => {
+        try {
+          const p = await api.Updates.getProgress();
+          if (p) setLiveUpdateProgress(p);
+        } catch (_) {}
+      }, 500);
+    } else {
+      if (updatePollRef.current) clearInterval(updatePollRef.current);
+    }
+    return () => {
+      if (updatePollRef.current) clearInterval(updatePollRef.current);
+    };
+  }, [updatingApp]);
+
   const handleApplyAppUpdate = async () => {
     if (!window.confirm('Apply latest updates from GitHub? All worlds, databases, player data, and configurations are 100% preserved.')) return;
     setUpdatingApp(true);
+    setLiveUpdateProgress({
+      stage: 1,
+      progressPercent: 12,
+      stageName: 'Initializing update',
+      details: 'Connecting to update engine...',
+    });
+
     try {
       const res = await api.Updates.apply();
       setCredToast({
@@ -1119,14 +1146,21 @@ export const Settings = () => {
                       </div>
                     )}
 
+                    {/* Live Progress Bar during active update */}
+                    {updatingApp && (
+                      <div className="p-4 rounded-xl mb-4" style={{ background: 'rgba(15, 23, 42, 0.7)', border: '1px solid rgba(6, 182, 212, 0.3)' }}>
+                        <UpdateProgressBar progress={liveUpdateProgress} />
+                      </div>
+                    )}
+
                     <div className="d-flex items-center justify-between flex-wrap gap-3">
                       <button
                         type="button"
-                        className="btn btn-primary font-bold px-4 py-2"
+                        className="btn btn-primary font-bold px-5 py-2.5"
                         onClick={handleApplyAppUpdate}
                         disabled={updatingApp || !isAdmin}
                       >
-                        {updatingApp ? 'Applying Update (zero data loss)...' : '🚀 Update App Now (Zero Data Loss)'}
+                        {updatingApp ? 'Applying Update...' : '🚀 Update App Now (Zero Data Loss)'}
                       </button>
 
                       {updateStatus.isIgnored && (

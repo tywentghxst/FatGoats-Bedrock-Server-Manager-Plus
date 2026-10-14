@@ -2,6 +2,44 @@ import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import api from '../api';
 import { useAuth } from '../context/AuthContext';
 
+// Clean up addon archive filenames for fallback display
+export const cleanFileName = (filename) => {
+  if (!filename) return '';
+  return filename
+    .replace(/\.(mcaddon|mcpack|zip|mcworld)$/i, '')
+    .replace(/\s*[\(\[\{]?(addon|pack|bp|rp|behavior|resource)[\)\]\}]?\s*$/i, '')
+    .replace(/[_-]+/g, ' ')
+    .trim();
+};
+
+// Resilient title helper ensuring no 'pack.name' ever appears in the UI
+export const getAddonTitle = (addon) => {
+  if (!addon) return 'Unnamed Pack';
+  if (addon.display_name && addon.display_name.trim() && addon.display_name !== 'pack.name') {
+    return addon.display_name;
+  }
+  if (addon.name && addon.name !== 'pack.name' && !addon.name.startsWith('pack.')) {
+    return addon.name;
+  }
+  if (addon.original_filename) {
+    const cleaned = cleanFileName(addon.original_filename);
+    if (cleaned) return cleaned;
+  }
+  return addon.name || addon.uuid || 'Custom Pack';
+};
+
+// Resilient description helper ensuring no 'pack.description' appears
+export const getAddonDescription = (addon) => {
+  if (!addon) return '';
+  if (addon.description && addon.description !== 'pack.description' && !addon.description.startsWith('pack.')) {
+    return addon.description;
+  }
+  if (addon.notes && addon.notes.trim()) {
+    return addon.notes;
+  }
+  return 'Custom Minecraft Bedrock addon package.';
+};
+
 export const Addons = () => {
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
@@ -275,8 +313,8 @@ export const Addons = () => {
   const openEditModal = (addon) => {
     setEditModalAddon(addon);
     setEditForm({
-      displayName: addon.display_name || addon.name || '',
-      description: addon.description || '',
+      displayName: getAddonTitle(addon),
+      description: addon.description && addon.description !== 'pack.description' ? addon.description : '',
       downloadUrl: addon.download_url || '',
       notes: addon.notes || '',
       type: addon.type || 'behavior',
@@ -294,7 +332,7 @@ export const Addons = () => {
 
     try {
       await api.Addons.updateMetadata(editModalAddon.uuid, editForm);
-      setSuccessMsg(`Addon metadata for "${editForm.displayName || editModalAddon.name}" saved successfully.`);
+      setSuccessMsg(`Addon metadata for "${editForm.displayName || getAddonTitle(editModalAddon)}" saved successfully.`);
       setEditModalAddon(null);
       await loadData();
     } catch (err) {
@@ -1165,8 +1203,8 @@ export const Addons = () => {
 
                     {/* Card Title & Version */}
                     <div className="addon-title-strip mb-2">
-                      <h3 className="addon-main-title" title={addon.display_name || addon.name}>
-                        {addon.display_name || addon.name}
+                      <h3 className="addon-main-title" title={getAddonTitle(addon)}>
+                        {getAddonTitle(addon)}
                       </h3>
                       <div className="d-flex items-center gap-2 text-xs text-sub mt-0.5">
                         <span className="font-mono text-emerald font-bold">v{addon.version}</span>
@@ -1180,7 +1218,7 @@ export const Addons = () => {
 
                     {/* Description */}
                     <p className="addon-card-desc text-sub text-xs mb-4">
-                      {addon.description || 'No description provided in manifest.json.'}
+                      {getAddonDescription(addon)}
                     </p>
 
                     {/* Metadata strip: UUID & Download link */}
@@ -1371,7 +1409,11 @@ export const Addons = () => {
                         <div className="pack-order-badge">#{idx + 1}</div>
                         <div className="pack-info flex-1 min-w-0">
                           <div className="d-flex items-center gap-2">
-                            <span className="pack-item-name font-bold text-white truncate">{pack.name}</span>
+                            {(() => {
+                              const matching = addonsList.find((a) => a.uuid === pack.uuid);
+                              const title = matching ? getAddonTitle(matching) : (pack.name && pack.name !== 'pack.name' ? pack.name : pack.uuid);
+                              return <span className="pack-item-name font-bold text-white truncate">{title}</span>;
+                            })()}
                             {isSystem && (
                               <span className="badge badge-system text-xs py-0 px-1">⚙️ System</span>
                             )}
@@ -1429,23 +1471,26 @@ export const Addons = () => {
                   <p className="text-muted text-xs italic m-0">All installed behavior packs are active.</p>
                 ) : (
                   <div className="d-flex flex-wrap gap-2">
-                    {inactiveBP.map((pack) => (
-                      <button
-                        key={pack.uuid}
-                        type="button"
-                        className="available-chip"
-                        onClick={() => {
-                          const v = typeof pack.version === 'string'
-                            ? pack.version.split('.').map((n) => parseInt(n, 10) || 0)
-                            : (Array.isArray(pack.version) ? pack.version : [1, 0, 0]);
-                          setActiveBP([...activeBP, { uuid: pack.uuid, version: v, name: pack.display_name || pack.name }]);
-                        }}
-                        title={`Click to add ${pack.display_name || pack.name} to active list`}
-                      >
-                        <span>{pack.display_name || pack.name}</span>
-                        <span className="chip-plus">+</span>
-                      </button>
-                    ))}
+                    {inactiveBP.map((pack) => {
+                      const title = getAddonTitle(pack);
+                      return (
+                        <button
+                          key={pack.uuid}
+                          type="button"
+                          className="available-chip"
+                          onClick={() => {
+                            const v = typeof pack.version === 'string'
+                              ? pack.version.split('.').map((n) => parseInt(n, 10) || 0)
+                              : (Array.isArray(pack.version) ? pack.version : [1, 0, 0]);
+                            setActiveBP([...activeBP, { uuid: pack.uuid, version: v, name: title }]);
+                          }}
+                          title={`Click to add ${title} to active list`}
+                        >
+                          <span>{title}</span>
+                          <span className="chip-plus">+</span>
+                        </button>
+                      );
+                    })}
                   </div>
                 )}
               </div>
@@ -1490,7 +1535,11 @@ export const Addons = () => {
                         <div className="pack-order-badge rp-badge">#{idx + 1}</div>
                         <div className="pack-info flex-1 min-w-0">
                           <div className="d-flex items-center gap-2">
-                            <span className="pack-item-name font-bold text-white truncate">{pack.name}</span>
+                            {(() => {
+                              const matching = addonsList.find((a) => a.uuid === pack.uuid);
+                              const title = matching ? getAddonTitle(matching) : (pack.name && pack.name !== 'pack.name' ? pack.name : pack.uuid);
+                              return <span className="pack-item-name font-bold text-white truncate">{title}</span>;
+                            })()}
                             {isSystem && (
                               <span className="badge badge-system text-xs py-0 px-1">⚙️ System</span>
                             )}
@@ -1548,23 +1597,26 @@ export const Addons = () => {
                   <p className="text-muted text-xs italic m-0">All installed resource packs are active.</p>
                 ) : (
                   <div className="d-flex flex-wrap gap-2">
-                    {inactiveRP.map((pack) => (
-                      <button
-                        key={pack.uuid}
-                        type="button"
-                        className="available-chip"
-                        onClick={() => {
-                          const v = typeof pack.version === 'string'
-                            ? pack.version.split('.').map((n) => parseInt(n, 10) || 0)
-                            : (Array.isArray(pack.version) ? pack.version : [1, 0, 0]);
-                          setActiveRP([...activeRP, { uuid: pack.uuid, version: v, name: pack.display_name || pack.name }]);
-                        }}
-                        title={`Click to add ${pack.display_name || pack.name} to active list`}
-                      >
-                        <span>{pack.display_name || pack.name}</span>
-                        <span className="chip-plus">+</span>
-                      </button>
-                    ))}
+                    {inactiveRP.map((pack) => {
+                      const title = getAddonTitle(pack);
+                      return (
+                        <button
+                          key={pack.uuid}
+                          type="button"
+                          className="available-chip"
+                          onClick={() => {
+                            const v = typeof pack.version === 'string'
+                              ? pack.version.split('.').map((n) => parseInt(n, 10) || 0)
+                              : (Array.isArray(pack.version) ? pack.version : [1, 0, 0]);
+                            setActiveRP([...activeRP, { uuid: pack.uuid, version: v, name: title }]);
+                          }}
+                          title={`Click to add ${title} to active list`}
+                        >
+                          <span>{title}</span>
+                          <span className="chip-plus">+</span>
+                        </button>
+                      );
+                    })}
                   </div>
                 )}
               </div>
@@ -1893,7 +1945,7 @@ export const Addons = () => {
         <div className="modal-overlay" onClick={() => !inPlaceUpdating && setInPlaceUpdateAddon(null)}>
           <div className="modal" onClick={(e) => e.stopPropagation()} role="dialog">
             <div className="modal-header">
-              <h3 className="modal-title">☁️ In-Place Update: {inPlaceUpdateAddon.display_name || inPlaceUpdateAddon.name}</h3>
+              <h3 className="modal-title">☁️ In-Place Update: {getAddonTitle(inPlaceUpdateAddon)}</h3>
               <button
                 type="button"
                 className="modal-close-btn"
@@ -1906,7 +1958,7 @@ export const Addons = () => {
             <form onSubmit={handleInPlaceUpdate}>
               <div className="modal-body p-5">
                 <p className="text-sub text-sm mb-4">
-                  Replaces the files on disk for <strong>"{inPlaceUpdateAddon.name}"</strong> while preserving your enabled/disabled state, custom settings, and download URLs.
+                  Replaces the files on disk for <strong>"{getAddonTitle(inPlaceUpdateAddon)}"</strong> while preserving your enabled/disabled state, custom settings, and download URLs.
                 </p>
 
                 <div
@@ -1979,7 +2031,7 @@ export const Addons = () => {
 
               <div className="modal-body p-5">
                 <p className="text-white mb-2">
-                  Are you sure you want to uninstall and remove <strong>"{deleteModalPack.display_name || deleteModalPack.name}"</strong>?
+                  Are you sure you want to uninstall and remove <strong>"{getAddonTitle(deleteModalPack)}"</strong>?
                 </p>
                 <div className="p-3 bg-darker rounded font-mono text-xs text-sub mb-3">
                   UUID: {deleteModalPack.uuid}<br />
@@ -1993,7 +2045,7 @@ export const Addons = () => {
                       <span>Paired Companion Dual-Pack Detected</span>
                     </div>
                     <p className="text-xs text-sub mb-3">
-                      This pack is paired with <strong>"{companion.display_name || companion.name}"</strong> ({companion.type === 'resource' ? 'Resource Pack' : 'Behavior Pack'}). How would you like to delete it?
+                      This pack is paired with <strong>"{getAddonTitle(companion)}"</strong> ({companion.type === 'resource' ? 'Resource Pack' : 'Behavior Pack'}). How would you like to delete it?
                     </p>
                     <div className="d-flex flex-col gap-2">
                       <label

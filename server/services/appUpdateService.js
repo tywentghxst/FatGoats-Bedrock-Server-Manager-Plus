@@ -53,6 +53,34 @@ class AppUpdateService {
   constructor() {
     this.isUpdating = false;
     this.updateProgress = null;
+    this.updateState = {
+      isUpdating: false,
+      stage: 0,
+      totalStages: 5,
+      stageName: 'Idle',
+      progressPercent: 0,
+      details: '',
+      error: null,
+      newCommit: null,
+    };
+  }
+
+  getProgress() {
+    return this.updateState;
+  }
+
+  setStage(stage, progressPercent, stageName, details) {
+    this.updateState = {
+      ...this.updateState,
+      isUpdating: true,
+      stage,
+      progressPercent,
+      stageName,
+      details,
+      error: null,
+    };
+    this.updateProgress = `${stageName}: ${details}`;
+    console.log(`[AppUpdateService] [Stage ${stage}/5 (${progressPercent}%)] ${stageName} - ${details}`);
   }
 
   getPreferences() {
@@ -181,11 +209,10 @@ class AppUpdateService {
     }
 
     this.isUpdating = true;
-    this.updateProgress = 'Starting update process...';
+    this.setStage(1, 15, 'Safeguarding User Data', 'Creating safety backup of SQLite database and configs...');
 
     try {
       // STEP 1: Safeguard User Data
-      this.updateProgress = 'Creating pre-update safety backup of database...';
       const dbPath = path.join(ROOT_DIR, 'data', 'db', 'manager.db');
       const dbBackupPath = path.join(ROOT_DIR, 'data', 'db', `manager.db.pre-update-${Date.now()}.bak`);
       if (fs.existsSync(dbPath)) {
@@ -198,13 +225,13 @@ class AppUpdateService {
       }
 
       // STEP 2: Pull Latest Commits
-      this.updateProgress = 'Pulling latest code changes from GitHub (main)...';
+      this.setStage(2, 40, 'Pulling GitHub Commits', 'Pulling latest code changes from GitHub (origin/main)...');
       console.log('[AppUpdateService] Pulling origin main...');
       const pullOutput = execGit('git pull origin main', { timeout: 45000 });
       console.log('[AppUpdateService] Pull result:', pullOutput);
 
       // STEP 3: Dependencies Update (if needed)
-      this.updateProgress = 'Verifying and updating client dependencies...';
+      this.setStage(3, 60, 'Syncing Dependencies', 'Verifying package dependencies...');
       try {
         execSync('cmd /c "npm install --no-audit --no-fund"', {
           cwd: ROOT_DIR,
@@ -216,7 +243,7 @@ class AppUpdateService {
       }
 
       // STEP 4: Build React Frontend
-      this.updateProgress = 'Compiling production frontend assets with Vite...';
+      this.setStage(4, 80, 'Compiling Web Assets', 'Compiling production client assets with Vite...');
       try {
         execSync('cmd /c "cd client && npm run build"', {
           cwd: ROOT_DIR,
@@ -229,7 +256,7 @@ class AppUpdateService {
       }
 
       // STEP 5: Rebuild Windows Tray Executable (if C# compiler exists)
-      this.updateProgress = 'Recompiling BedrockServerManager.exe Windows tray launcher...';
+      this.setStage(5, 95, 'Rebuilding Tray Launcher', 'Recompiling BedrockServerManager.exe Windows tray launcher...');
       const cscPath = 'C:\\Windows\\Microsoft.NET\\Framework64\\v4.0.30319\\csc.exe';
       if (fs.existsSync(cscPath)) {
         try {
@@ -251,14 +278,20 @@ class AppUpdateService {
       setSetting('app_update_ignored_commit', '');
       setSetting('app_update_ask_later_until', '0');
 
-      this.updateProgress = 'Update successfully applied!';
       const newCommit = execGit('git rev-parse --short HEAD');
+      this.setStage(5, 100, 'Update Complete', `App successfully updated to #${newCommit}!`);
+      this.updateState.isUpdating = false;
+      this.updateState.newCommit = newCommit;
 
       return {
         success: true,
         newCommit,
         message: `App successfully updated to commit #${newCommit}. All worlds, player data, and configurations were safely preserved.`,
       };
+    } catch (err) {
+      this.updateState.error = err.message;
+      this.updateState.isUpdating = false;
+      throw err;
     } finally {
       this.isUpdating = false;
     }

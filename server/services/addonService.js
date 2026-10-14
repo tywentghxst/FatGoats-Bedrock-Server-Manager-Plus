@@ -109,12 +109,70 @@ async function extractNestedArchives(dir) {
 }
 
 /**
+ * Clean up an addon archive filename for human display
+ * E.g., "Village Cities Add-On 1.2 (addon).mcaddon" -> "Village Cities Add-On 1.2"
+ */
+function cleanAddonFileName(filename) {
+  if (!filename) return '';
+  let clean = path.basename(filename);
+  clean = clean.replace(/\.(mcaddon|mcpack|zip|mcworld)$/i, '');
+  clean = clean.replace(/\s*[\(\[\{]?(addon|pack|bp|rp|behavior|resource)[\)\]\}]?\s*$/i, '');
+  clean = clean.replace(/[_-]+/g, ' ').trim();
+  return clean || path.basename(filename);
+}
+
+/**
+ * Attempt to read and parse texts/en_US.lang (or any .lang file) for pack.name and pack.description
+ */
+function parseTextsLang(packDir) {
+  try {
+    const candidates = [
+      path.join(packDir, 'texts'),
+      packDir
+    ];
+    for (const dir of candidates) {
+      if (!fs.existsSync(dir)) continue;
+      const files = fs.readdirSync(dir);
+      const langFile = files.find(f => f.toLowerCase() === 'en_us.lang') || files.find(f => f.toLowerCase().endsWith('.lang'));
+      if (langFile) {
+        const content = fs.readFileSync(path.join(dir, langFile), 'utf8');
+        const lines = content.split(/\r?\n/);
+        const result = {};
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed || trimmed.startsWith('##') || trimmed.startsWith('//')) continue;
+          const eqIdx = trimmed.indexOf('=');
+          if (eqIdx !== -1) {
+            const key = trimmed.slice(0, eqIdx).trim().toLowerCase();
+            const val = trimmed.slice(eqIdx + 1).trim();
+            if (key === 'pack.name') result.name = val;
+            if (key === 'pack.description') result.description = val;
+          }
+        }
+        if (result.name || result.description) return result;
+      }
+    }
+  } catch (_) {}
+  return {};
+}
+
+/**
  * Detect if a pack is an internal Mojang/BDS engine system addon (shipped with the server)
  */
 function isSystemPack(folderOrName, manifestName = '', packPath = '') {
   const f = path.basename(packPath || folderOrName || '').toLowerCase();
   const n = (manifestName || '').toLowerCase();
   const orig = (folderOrName || '').toLowerCase();
+
+  // If directory name is a UUID (our custom addon install directory format), it is NEVER a system pack
+  const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(f);
+  if (isUuid) return false;
+
+  // If original filename has archive extension or addon marker, it is NEVER a system pack
+  if (orig.includes('.mcaddon') || orig.includes('.mcpack') || orig.includes('(addon)') || orig.includes('add-on')) {
+    return false;
+  }
+
   return (
     f.startsWith('vanilla') ||
     f.startsWith('chemistry') ||
@@ -128,32 +186,58 @@ function isSystemPack(folderOrName, manifestName = '', packPath = '') {
     orig.startsWith('experimental_') ||
     orig.startsWith('server_') ||
     orig.includes('gametest') ||
-    n === 'pack.name' ||
-    n.startsWith('resourcepack.') ||
-    n.startsWith('behaviorpack.') ||
-    n.startsWith('@minecraft/') ||
-    n.startsWith('vanilla')
+    n.startsWith('resourcepack.vanilla') ||
+    n.startsWith('behaviorpack.vanilla') ||
+    n.startsWith('@minecraft/')
   );
 }
 
 /**
- * Migration helper to ensure system packs in DB are marked is_system = 1
+ * Migration helper to ensure system packs in DB are marked is_system = 1,
+ * and user custom packs are correctly marked is_system = 0 with localized / file names.
  */
 function syncSystemPacksFlag() {
   try {
-    const all = db.prepare('SELECT id, name, original_filename, path FROM addons').all();
-    const updateStmt = db.prepare('UPDATE addons SET is_system = 1 WHERE id = ?');
+    const all = db.prepare('SELECT id, uuid, name, display_name, original_filename, path, is_system FROM addons').all();
+    const updateStmt = db.prepare(`
+      UPDATE addons
+      SET is_system = ?, name = ?, display_name = ?,
+          description = CASE WHEN (description IS NULL OR description = 'pack.description' OR description = '') AND ? != '' THEN ? ELSE description END
+      WHERE id = ?
+    `);
+
     for (const a of all) {
-      if (isSystemPack(a.original_filename || a.name, a.name, a.path)) {
-        updateStmt.run(a.id);
+      const isSys = isSystemPack(a.original_filename || a.name, a.name, a.path) ? 1 : 0;
+      let finalName = a.name;
+      let finalDisplayName = a.display_name || '';
+      let resolvedDesc = '';
+
+      const langMeta = a.path ? parseTextsLang(a.path) : {};
+
+      if (!finalName || finalName === 'pack.name' || finalName.startsWith('pack.')) {
+        if (langMeta.name && langMeta.name !== 'pack.name') {
+          finalName = langMeta.name;
+        } else if (a.original_filename) {
+          finalName = cleanAddonFileName(a.original_filename);
+        }
       }
+
+      if (langMeta.description && langMeta.description !== 'pack.description') {
+        resolvedDesc = langMeta.description;
+      }
+
+      if (!finalDisplayName || finalDisplayName === 'pack.name') {
+        finalDisplayName = (a.original_filename && cleanAddonFileName(a.original_filename)) || finalName;
+      }
+
+      updateStmt.run(isSys, finalName, finalDisplayName, resolvedDesc, resolvedDesc, a.id);
     }
   } catch (err) {
-    // Database might still be initializing or table not yet created
+    console.warn('[AddonService] Notice during system packs sync:', err.message);
   }
 }
 
-// Ensure existing scanned packs are tagged
+// Ensure existing scanned packs are tagged and named properly
 setTimeout(() => {
   syncSystemPacksFlag();
 }, 1000);
@@ -161,14 +245,12 @@ setTimeout(() => {
 /**
  * Parse manifest and determine whether it's Behavior or Resource Pack
  */
-function parseManifest(manifestPath, packDir) {
+function parseManifest(manifestPath, packDir, originalFilename = '') {
   const raw = fs.readFileSync(manifestPath, 'utf8');
   const manifest = JSON.parse(raw);
 
   const header = manifest.header || {};
   const uuid = header.uuid;
-  const name = header.name || 'Unnamed Pack';
-  const description = header.description || '';
   const versionArr = Array.isArray(header.version) ? header.version : [1, 0, 0];
   const version = versionArr.join('.');
   const formatVersion = manifest.format_version || 1;
@@ -176,6 +258,29 @@ function parseManifest(manifestPath, packDir) {
 
   if (!uuid) {
     throw new Error('manifest.json is missing required header.uuid property');
+  }
+
+  // Attempt to resolve localized name and description from texts/en_US.lang
+  const langMeta = parseTextsLang(packDir);
+
+  let name = header.name || '';
+  if (!name || name === 'pack.name' || name.startsWith('pack.')) {
+    if (langMeta.name && langMeta.name !== 'pack.name') {
+      name = langMeta.name;
+    } else if (originalFilename) {
+      name = cleanAddonFileName(originalFilename);
+    } else {
+      name = cleanAddonFileName(path.basename(packDir));
+    }
+  }
+
+  let description = header.description || '';
+  if (!description || description === 'pack.description' || description.startsWith('pack.')) {
+    if (langMeta.description && langMeta.description !== 'pack.description') {
+      description = langMeta.description;
+    } else {
+      description = '';
+    }
   }
 
   const modules = Array.isArray(manifest.modules) ? manifest.modules : [];
@@ -262,7 +367,7 @@ async function processAddonUpload(filePath, originalFilename = '', options = {})
 
     for (const packDir of manifestDirs) {
       const manifestPath = path.join(packDir, 'manifest.json');
-      const parsed = parseManifest(manifestPath, packDir);
+      const parsed = parseManifest(manifestPath, packDir, originalFilename);
 
       const targetSubdir = parsed.type === 'resource' ? 'resource_packs' : 'behavior_packs';
       const destPacksDir = path.join(config.BDS_DIR, targetSubdir);
@@ -288,23 +393,28 @@ async function processAddonUpload(filePath, originalFilename = '', options = {})
         }
       }
 
-      // Upsert into SQLite
+      const cleanName = cleanAddonFileName(originalFilename);
+      const initialDisplayName = parsed.name || cleanName;
+
+      // Upsert into SQLite (ALWAYS mark is_system = 0 for user uploads)
       const existing = db.prepare('SELECT id, display_name, download_url, notes FROM addons WHERE uuid = ?').get(parsed.uuid);
       if (existing) {
         const updateStmt = db.prepare(`
           UPDATE addons
           SET name = ?, type = ?, version = ?, description = ?, path = ?,
               group_id = COALESCE(?, group_id),
-              original_filename = COALESCE(NULLIF(?, ''), original_filename)
+              original_filename = COALESCE(NULLIF(?, ''), original_filename),
+              display_name = CASE WHEN display_name IS NULL OR display_name = '' OR display_name = 'pack.name' THEN ? ELSE display_name END,
+              is_system = 0
           WHERE uuid = ?
         `);
-        updateStmt.run(parsed.name, parsed.type, parsed.version, parsed.description, destPackPath, groupId, originalFilename, parsed.uuid);
+        updateStmt.run(parsed.name, parsed.type, parsed.version, parsed.description, destPackPath, groupId, originalFilename, initialDisplayName, parsed.uuid);
       } else {
         const insertStmt = db.prepare(`
-          INSERT INTO addons (uuid, name, type, version, description, path, group_id, original_filename, download_url, display_name, notes)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, '', '', '')
+          INSERT INTO addons (uuid, name, type, version, description, path, group_id, original_filename, download_url, display_name, notes, is_system)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, '', ?, '', 0)
         `);
-        insertStmt.run(parsed.uuid, parsed.name, parsed.type, parsed.version, parsed.description, destPackPath, groupId, originalFilename);
+        insertStmt.run(parsed.uuid, parsed.name, parsed.type, parsed.version, parsed.description, destPackPath, groupId, originalFilename, initialDisplayName);
       }
 
       processedAddons.push({
@@ -405,24 +515,26 @@ function scanDiskFolders() {
 
       scannedCount++;
       try {
-        const parsed = parseManifest(manifestPath, packDir);
-        const existing = db.prepare('SELECT id FROM addons WHERE uuid = ?').get(parsed.uuid);
-        const isSys = isSystemPack(entry.name, parsed.name, packDir) ? 1 : 0;
+        const parsed = parseManifest(manifestPath, packDir, entry.name);
+        const existing = db.prepare('SELECT id, original_filename, display_name FROM addons WHERE uuid = ?').get(parsed.uuid);
+        const isSys = isSystemPack(existing?.original_filename || entry.name, parsed.name, packDir) ? 1 : 0;
+        const initialDisplay = parsed.name || cleanAddonFileName(entry.name);
 
         if (existing) {
           const updateStmt = db.prepare(`
             UPDATE addons
-            SET name = ?, type = ?, version = ?, description = ?, path = ?, is_system = ?
+            SET name = ?, type = ?, version = ?, description = ?, path = ?, is_system = ?,
+                display_name = CASE WHEN display_name IS NULL OR display_name = '' OR display_name = 'pack.name' THEN ? ELSE display_name END
             WHERE uuid = ?
           `);
-          updateStmt.run(parsed.name, type, parsed.version, parsed.description, packDir, isSys, parsed.uuid);
+          updateStmt.run(parsed.name, type, parsed.version, parsed.description, packDir, isSys, initialDisplay, parsed.uuid);
           updatedCount++;
         } else {
           const insertStmt = db.prepare(`
-            INSERT INTO addons (uuid, name, type, version, description, path, original_filename, is_system)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO addons (uuid, name, type, version, description, path, original_filename, display_name, is_system)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
           `);
-          insertStmt.run(parsed.uuid, parsed.name, type, parsed.version, parsed.description, packDir, entry.name, isSys);
+          insertStmt.run(parsed.uuid, parsed.name, type, parsed.version, parsed.description, packDir, entry.name, initialDisplay, isSys);
           newCount++;
         }
       } catch (err) {
@@ -1153,5 +1265,7 @@ module.exports = {
   setActiveAddons,
   runDiagnostics,
   executeAutoFix,
-  executeBulk
+  executeBulk,
+  cleanAddonFileName,
+  syncSystemPacksFlag
 };

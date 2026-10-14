@@ -31,6 +31,7 @@ namespace BedrockServerManager.Installer
         private BackgroundWorker worker;
 
         private const string REPO_ZIP_URL = "https://github.com/tywentghxst/FatGoats-Bedrock-Server-Manager-Plus/archive/refs/heads/main.zip";
+        private const string NODE_ZIP_URL = "https://nodejs.org/dist/v20.18.0/node-v20.18.0-win-x64.zip";
 
         public InstallerForm()
         {
@@ -40,7 +41,7 @@ namespace BedrockServerManager.Installer
         private void InitializeComponent()
         {
             this.Text = "Bedrock Server Manager Plus — Setup Wizard";
-            this.Size = new Size(620, 560);
+            this.Size = new Size(640, 580);
             this.StartPosition = FormStartPosition.CenterScreen;
             this.FormBorderStyle = FormBorderStyle.FixedDialog;
             this.MaximizeBox = false;
@@ -79,7 +80,7 @@ namespace BedrockServerManager.Installer
             headerPanel.Controls.Add(lblTitle);
 
             lblSubtitle = new Label();
-            lblSubtitle.Text = "Universal Installer & Dependency Setup Engine";
+            lblSubtitle.Text = "Universal Installer & Automated Dependency Engine";
             lblSubtitle.Font = new Font("Segoe UI", 9F, FontStyle.Regular, GraphicsUnit.Point);
             lblSubtitle.ForeColor = Color.FromArgb(148, 163, 184); // Slate 400
             lblSubtitle.Location = new Point(22, 48);
@@ -100,7 +101,7 @@ namespace BedrockServerManager.Installer
             txtInstallDir = new TextBox();
             txtInstallDir.Text = defaultPath;
             txtInstallDir.Location = new Point(24, 124);
-            txtInstallDir.Size = new Size(465, 25);
+            txtInstallDir.Size = new Size(480, 25);
             txtInstallDir.BackColor = Color.FromArgb(30, 41, 59);
             txtInstallDir.ForeColor = Color.White;
             txtInstallDir.BorderStyle = BorderStyle.FixedSingle;
@@ -108,7 +109,7 @@ namespace BedrockServerManager.Installer
 
             btnBrowse = new Button();
             btnBrowse.Text = "Browse...";
-            btnBrowse.Location = new Point(500, 122);
+            btnBrowse.Location = new Point(515, 122);
             btnBrowse.Size = new Size(88, 27);
             btnBrowse.BackColor = Color.FromArgb(51, 65, 85);
             btnBrowse.ForeColor = Color.White;
@@ -156,14 +157,14 @@ namespace BedrockServerManager.Installer
             // Progress Bar
             progressBar = new ProgressBar();
             progressBar.Location = new Point(24, 250);
-            progressBar.Size = new Size(564, 16);
+            progressBar.Size = new Size(579, 16);
             progressBar.Style = ProgressBarStyle.Continuous;
             this.Controls.Add(progressBar);
 
             lblStatus = new Label();
             lblStatus.Text = "Ready to begin setup. Click 'Install Now' below.";
             lblStatus.Location = new Point(24, 272);
-            lblStatus.Size = new Size(564, 20);
+            lblStatus.Size = new Size(579, 20);
             lblStatus.ForeColor = Color.FromArgb(52, 211, 153); // Emerald
             lblStatus.Font = new Font("Segoe UI", 8.5F, FontStyle.Bold);
             this.Controls.Add(lblStatus);
@@ -171,7 +172,7 @@ namespace BedrockServerManager.Installer
             // Output Log Box
             txtLog = new TextBox();
             txtLog.Location = new Point(24, 298);
-            txtLog.Size = new Size(564, 140);
+            txtLog.Size = new Size(579, 160);
             txtLog.Multiline = true;
             txtLog.ReadOnly = true;
             txtLog.ScrollBars = ScrollBars.Vertical;
@@ -196,7 +197,7 @@ namespace BedrockServerManager.Installer
 
             btnCancel = new Button();
             btnCancel.Text = "Cancel";
-            btnCancel.Location = new Point(390, 15);
+            btnCancel.Location = new Point(405, 15);
             btnCancel.Size = new Size(95, 32);
             btnCancel.BackColor = Color.FromArgb(51, 65, 85);
             btnCancel.ForeColor = Color.White;
@@ -207,7 +208,7 @@ namespace BedrockServerManager.Installer
 
             btnInstall = new Button();
             btnInstall.Text = "🚀 Install Now";
-            btnInstall.Location = new Point(495, 14);
+            btnInstall.Location = new Point(510, 14);
             btnInstall.Size = new Size(110, 34);
             btnInstall.BackColor = Color.FromArgb(16, 185, 129); // Emerald 500
             btnInstall.ForeColor = Color.FromArgb(15, 23, 42); // Slate 900
@@ -235,20 +236,6 @@ namespace BedrockServerManager.Installer
                 return;
             }
             txtLog.AppendText(string.Format("[{0:HH:mm:ss}] {1}\r\n", DateTime.Now, message));
-        }
-
-        private void UpdateStatus(string message, int progress)
-        {
-            if (this.InvokeRequired)
-            {
-                this.Invoke(new Action<string, int>(UpdateStatus), message, progress);
-                return;
-            }
-            lblStatus.Text = message;
-            if (progress >= 0 && progress <= 100)
-            {
-                progressBar.Value = progress;
-            }
         }
 
         private void BtnInstall_Click(object sender, EventArgs e)
@@ -287,6 +274,103 @@ namespace BedrockServerManager.Installer
             }
         }
 
+        private class NodeInfo
+        {
+            public string NodeExe;
+            public string NpmCmd;
+            public string NodeDir;
+        }
+
+        private NodeInfo ResolveOrInstallNode(string targetDir)
+        {
+            worker.ReportProgress(4, "Scanning system for Node.js runtime...");
+
+            // 1. Search candidate directories
+            string[] candidateDirs = new string[]
+            {
+                Path.Combine(targetDir, "nodejs"),
+                @"C:\Program Files\nodejs",
+                @"C:\Program Files (x86)\nodejs",
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), @"Programs\nodejs"),
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), @"Programs\node"),
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), @"npm")
+            };
+
+            foreach (string dir in candidateDirs)
+            {
+                string nodePath = Path.Combine(dir, "node.exe");
+                if (File.Exists(nodePath))
+                {
+                    string ver = RunCommandAndGetOutput(nodePath, "-v");
+                    if (!string.IsNullOrEmpty(ver))
+                    {
+                        string npmPath = Path.Combine(dir, "npm.cmd");
+                        if (!File.Exists(npmPath)) npmPath = Path.Combine(dir, "npm");
+                        worker.ReportProgress(8, string.Format("Found system Node.js {0} at {1}", ver.Trim(), dir));
+                        return new NodeInfo
+                        {
+                            NodeExe = nodePath,
+                            NpmCmd = npmPath,
+                            NodeDir = dir
+                        };
+                    }
+                }
+            }
+
+            // 2. Test PATH directly
+            string pathNodeVer = RunCommandAndGetOutput("node", "-v");
+            if (!string.IsNullOrEmpty(pathNodeVer))
+            {
+                worker.ReportProgress(8, string.Format("Found Node.js {0} in system PATH.", pathNodeVer.Trim()));
+                return new NodeInfo
+                {
+                    NodeExe = "node",
+                    NpmCmd = "npm.cmd",
+                    NodeDir = ""
+                };
+            }
+
+            // 3. Node.js was not found anywhere. Automatically download official Node.js LTS
+            worker.ReportProgress(10, "Node.js was not detected. Automatically downloading official Node.js LTS runtime...");
+            string tempNodeZip = Path.Combine(Path.GetTempPath(), string.Format("node-lts-{0}.zip", Environment.TickCount));
+            string tempNodeExtract = Path.Combine(Path.GetTempPath(), string.Format("node-extract-{0}", Environment.TickCount));
+
+            try
+            {
+                ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12;
+                using (WebClient client = new WebClient())
+                {
+                    client.Headers.Add("User-Agent", "BedrockServerManager-Setup");
+                    client.DownloadFile(NODE_ZIP_URL, tempNodeZip);
+                }
+
+                worker.ReportProgress(16, "Extracting bundled Node.js runtime...");
+                if (Directory.Exists(tempNodeExtract)) Directory.Delete(tempNodeExtract, true);
+                Directory.CreateDirectory(tempNodeExtract);
+                ZipFile.ExtractToDirectory(tempNodeZip, tempNodeExtract);
+
+                string[] subDirs = Directory.GetDirectories(tempNodeExtract);
+                string sourceNodeDir = subDirs.Length > 0 ? subDirs[0] : tempNodeExtract;
+                string destNodeDir = Path.Combine(targetDir, "nodejs");
+
+                CopyDirectoryRecursive(sourceNodeDir, destNodeDir);
+
+                worker.ReportProgress(20, "Bundled Node.js LTS configured at " + destNodeDir);
+
+                return new NodeInfo
+                {
+                    NodeExe = Path.Combine(destNodeDir, "node.exe"),
+                    NpmCmd = Path.Combine(destNodeDir, "npm.cmd"),
+                    NodeDir = destNodeDir
+                };
+            }
+            finally
+            {
+                try { File.Delete(tempNodeZip); } catch { }
+                try { Directory.Delete(tempNodeExtract, true); } catch { }
+            }
+        }
+
         private void Worker_DoWork(object sender, DoWorkEventArgs e)
         {
             InstallOptions opts = (InstallOptions)e.Argument;
@@ -294,27 +378,16 @@ namespace BedrockServerManager.Installer
 
             try
             {
-                // 1. Verify Prerequisites
-                worker.ReportProgress(5, "Verifying Node.js and system dependencies...");
-                string nodeVersion = RunCommandAndGetOutput("node", "-v");
-                if (string.IsNullOrEmpty(nodeVersion))
-                {
-                    worker.ReportProgress(8, "WARNING: Node.js was not detected in system PATH.");
-                    worker.ReportProgress(8, "Node.js (v18+) is recommended. Please install Node.js from https://nodejs.org/");
-                }
-                else
-                {
-                    worker.ReportProgress(10, string.Format("Detected Node.js version: {0}", nodeVersion.Trim()));
-                }
-
-                // 2. Prepare Directory
-                worker.ReportProgress(15, string.Format("Creating destination directory: {0}", targetDir));
+                // 1. Prepare Directory
                 if (!Directory.Exists(targetDir))
                 {
                     Directory.CreateDirectory(targetDir);
                 }
 
-                // 3. Download from GitHub
+                // 2. Resolve or Install Node.js runtime
+                NodeInfo node = ResolveOrInstallNode(targetDir);
+
+                // 3. Download repository package from GitHub
                 string tempZip = Path.Combine(Path.GetTempPath(), string.Format("bedrock-mgr-setup-{0}.zip", Environment.TickCount));
                 worker.ReportProgress(25, "Downloading latest repository package from GitHub...");
 
@@ -342,16 +415,35 @@ namespace BedrockServerManager.Installer
                 try { Directory.Delete(tempExtract, true); } catch { }
 
                 // 4. Install NPM Dependencies
-                worker.ReportProgress(65, "Installing core application dependencies (npm install)...");
-                ExecuteProcess("cmd.exe", "/c npm install --omit=dev", targetDir);
+                worker.ReportProgress(60, "Installing core application dependencies (npm install)...");
+                string npmCmd = node.NpmCmd;
+                if (!File.Exists(npmCmd) && !string.IsNullOrEmpty(node.NodeDir))
+                {
+                    string candidate = Path.Combine(node.NodeDir, "npm.cmd");
+                    if (File.Exists(candidate)) npmCmd = candidate;
+                }
 
-                // 5. Build Client Assets (if client folder exists)
+                ExecuteProcessWithEnv("cmd.exe", string.Format("/c \"\"{0}\" install --omit=dev --no-audit --no-fund\"", npmCmd), targetDir, node.NodeDir);
+
+                // Verify node_modules
+                string nodeModulesDir = Path.Combine(targetDir, "node_modules");
+                if (!Directory.Exists(nodeModulesDir) || Directory.GetDirectories(nodeModulesDir).Length == 0)
+                {
+                    worker.ReportProgress(70, "Verifying dependency installation...");
+                    ExecuteProcessWithEnv("cmd.exe", string.Format("/c \"\"{0}\" install --no-audit --no-fund\"", npmCmd), targetDir, node.NodeDir);
+                }
+
+                // 5. Verify/Build Client Frontend Assets
                 string clientDir = Path.Combine(targetDir, "client");
                 string distDir = Path.Combine(clientDir, "dist");
-                if (Directory.Exists(clientDir) && !Directory.Exists(distDir))
+                if (File.Exists(Path.Combine(distDir, "index.html")))
                 {
-                    worker.ReportProgress(80, "Compiling client frontend assets (npm run build)...");
-                    ExecuteProcess("cmd.exe", "/c npm install && npm run build", clientDir);
+                    worker.ReportProgress(82, "Verified pre-built production client assets.");
+                }
+                else if (Directory.Exists(clientDir))
+                {
+                    worker.ReportProgress(80, "Compiling client frontend assets (vite build)...");
+                    ExecuteProcessWithEnv("cmd.exe", string.Format("/c \"\"{0}\" install && \"{0}\" run build\"", npmCmd), clientDir, node.NodeDir);
                 }
 
                 // 6. Build or deploy Windows Tray Launcher
@@ -370,7 +462,7 @@ namespace BedrockServerManager.Installer
                     string compileArgs = string.Format("/target:winexe /out:\"{0}\" {1} /r:System.dll,System.Drawing.dll,System.Windows.Forms.dll,System.Core.dll \"{2}\"",
                         targetExe, iconArg, trayProgram);
 
-                    ExecuteProcess(csc, compileArgs, targetDir);
+                    ExecuteProcessWithEnv(csc, compileArgs, targetDir, node.NodeDir);
                 }
 
                 // 7. Create Shortcuts
@@ -440,13 +532,13 @@ namespace BedrockServerManager.Installer
                 }
             }
 
-            MessageBox.Show("Bedrock Server Manager Plus has been successfully installed on your computer!\n\nThe tray launcher is now running and will sit in your Windows system tray overflow area.",
+            MessageBox.Show("Bedrock Server Manager Plus has been successfully installed on your computer!\n\nThe tray launcher is now running in your Windows system tray overflow area, and your web browser will open to the dashboard.",
                 "Installation Complete", MessageBoxButtons.OK, MessageBoxIcon.Information);
 
             this.Close();
         }
 
-        private void ExecuteProcess(string exe, string args, string workingDir)
+        private void ExecuteProcessWithEnv(string exe, string args, string workingDir, string prependPath)
         {
             ProcessStartInfo psi = new ProcessStartInfo
             {
@@ -459,13 +551,19 @@ namespace BedrockServerManager.Installer
                 CreateNoWindow = true
             };
 
+            if (!string.IsNullOrEmpty(prependPath))
+            {
+                string currentPath = Environment.GetEnvironmentVariable("PATH") ?? "";
+                psi.EnvironmentVariables["PATH"] = prependPath + ";" + currentPath;
+            }
+
             using (Process p = Process.Start(psi))
             {
                 p.OutputDataReceived += (s, ev) => { if (!string.IsNullOrEmpty(ev.Data)) Log(ev.Data); };
                 p.ErrorDataReceived += (s, ev) => { if (!string.IsNullOrEmpty(ev.Data)) Log(ev.Data); };
                 p.BeginOutputReadLine();
                 p.BeginErrorReadLine();
-                p.WaitForExit(180000); // 3 minutes timeout
+                p.WaitForExit(300000); // 5 minutes timeout
             }
         }
 

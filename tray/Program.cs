@@ -303,6 +303,44 @@ namespace BedrockServerManager.Tray
             });
         }
 
+        private void EnsureDependencies(string nodeExe)
+        {
+            string nodeModules = Path.Combine(appDir, "node_modules");
+            if (!Directory.Exists(nodeModules) || Directory.GetDirectories(nodeModules).Length == 0)
+            {
+                Log("WARNING: node_modules missing. Attempting automated dependency restore...");
+                try
+                {
+                    string nodeDir = Path.GetDirectoryName(nodeExe);
+                    string npmCmd = Path.Combine(nodeDir ?? "", "npm.cmd");
+                    if (!File.Exists(npmCmd)) npmCmd = @"C:\Program Files\nodejs\npm.cmd";
+                    if (!File.Exists(npmCmd)) npmCmd = "npm.cmd";
+
+                    ProcessStartInfo psi = new ProcessStartInfo
+                    {
+                        FileName = "cmd.exe",
+                        Arguments = string.Format("/c \"\"{0}\" install --omit=dev --no-audit --no-fund\"", npmCmd),
+                        WorkingDirectory = appDir,
+                        CreateNoWindow = true,
+                        UseShellExecute = false
+                    };
+                    if (!string.IsNullOrEmpty(nodeDir))
+                    {
+                        psi.EnvironmentVariables["PATH"] = nodeDir + ";" + Environment.GetEnvironmentVariable("PATH");
+                    }
+                    using (Process p = Process.Start(psi))
+                    {
+                        p.WaitForExit(90000);
+                    }
+                    Log("Automated dependency restore finished.");
+                }
+                catch (Exception ex)
+                {
+                    Log("Automated dependency restore failed: " + ex.Message);
+                }
+            }
+        }
+
         private void StartNodeBackend()
         {
             try
@@ -323,6 +361,8 @@ namespace BedrockServerManager.Tray
                     return;
                 }
 
+                EnsureDependencies(nodeExe);
+
                 Log("Spawning Node backend: " + nodeExe + " " + serverScript);
 
                 ProcessStartInfo psi = new ProcessStartInfo();
@@ -335,6 +375,12 @@ namespace BedrockServerManager.Tray
                 psi.RedirectStandardOutput = true;
                 psi.RedirectStandardError = true;
                 psi.EnvironmentVariables["NODE_ENV"] = "production";
+
+                string nodeDir = Path.GetDirectoryName(nodeExe);
+                if (!string.IsNullOrEmpty(nodeDir))
+                {
+                    psi.EnvironmentVariables["PATH"] = nodeDir + ";" + Environment.GetEnvironmentVariable("PATH");
+                }
 
                 nodeProcess = new Process();
                 nodeProcess.StartInfo = psi;
@@ -356,15 +402,18 @@ namespace BedrockServerManager.Tray
         {
             string[] searchPaths = new string[]
             {
+                Path.Combine(appDir, @"nodejs\node.exe"),
                 @"C:\Program Files\nodejs\node.exe",
                 @"C:\Program Files (x86)\nodejs\node.exe",
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), @"Programs\nodejs\node.exe"),
                 Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), @"Programs\node\node.exe"),
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), @"npm\node.exe"),
                 "node.exe"
             };
 
             foreach (string p in searchPaths)
             {
-                if (p == "node.exe" || File.Exists(p))
+                if (p != "node.exe" && File.Exists(p))
                 {
                     return p;
                 }

@@ -1,6 +1,6 @@
 {
-  "commit": "d44bb14",
-  "commitFull": "d44bb1401f1f80e9f1e12ff1f004ff648c1e8b8b",
-  "date": "2 minutes ago",
-  "subject": "fix(updater): safeguard Windows file locks on running executables during in-app updates"
+  "commit": "be58efc",
+  "commitFull": "be58efcfb8f0e80f9f94bd8ab43966b9ac7eb2fa",
+  "date": "Just now",
+  "subject": "v1.2.2: Fix spawn java ENOENT in Xbox Live broadcaster with automated JRE/JDK discovery and PATH enrichment"
 }

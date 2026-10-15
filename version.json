@@ -1,6 +1,6 @@
 {
-  "commit": "80847ff",
-  "commitFull": "80847ff0bcaba017775746f918e2eb003ae0cb78",
+  "commit": "0fa379f",
+  "commitFull": "0fa379f032852446c1c4692d9864e6c39d570c72",
   "date": "Just now",
-  "subject": "feat(addons): add smart pack swap suggestions tab and on-click pack type swapper (BP <-> RP)"
+  "subject": "feat(mobile): overhaul mobile-only UI/UX look and feel, touch ergonomics, and dock navigation"
 }

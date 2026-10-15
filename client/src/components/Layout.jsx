@@ -486,20 +486,6 @@ export const Layout = () => {
           </NavLink>
 
           <NavLink
-            to="/xbox"
-            className={({ isActive }) => `mobile-nav-item ${isActive ? 'active' : ''}`}
-            onClick={closeSidebarOnNav}
-          >
-            <div className="mobile-nav-icon-wrap">
-              <span className="mobile-nav-icon">🎮</span>
-              {xboxStatus?.account?.authenticated && (
-                <span className={`mobile-nav-badge-dot ${xboxStatus?.state === 'running' ? 'live' : 'ready'}`} />
-              )}
-            </div>
-            <span className="mobile-nav-label">Xbox Bot</span>
-          </NavLink>
-
-          <NavLink
             to="/console"
             className={({ isActive }) => `mobile-nav-item ${isActive ? 'active' : ''}`}
             onClick={closeSidebarOnNav}
@@ -507,6 +493,33 @@ export const Layout = () => {
             <span className="mobile-nav-icon">🖥️</span>
             <span className="mobile-nav-label">Console</span>
           </NavLink>
+
+          {isAdmin ? (
+            <NavLink
+              to="/addons"
+              className={({ isActive }) => `mobile-nav-item ${isActive ? 'active' : ''}`}
+              onClick={closeSidebarOnNav}
+            >
+              <div className="mobile-nav-icon-wrap">
+                <span className="mobile-nav-icon">🧩</span>
+              </div>
+              <span className="mobile-nav-label">Addons</span>
+            </NavLink>
+          ) : (
+            <NavLink
+              to="/xbox"
+              className={({ isActive }) => `mobile-nav-item ${isActive ? 'active' : ''}`}
+              onClick={closeSidebarOnNav}
+            >
+              <div className="mobile-nav-icon-wrap">
+                <span className="mobile-nav-icon">🎮</span>
+                {xboxStatus?.account?.authenticated && (
+                  <span className={`mobile-nav-badge-dot ${xboxStatus?.state === 'running' ? 'live' : 'ready'}`} />
+                )}
+              </div>
+              <span className="mobile-nav-label">Xbox Bot</span>
+            </NavLink>
+          )}
 
           <NavLink
             to="/players"
@@ -523,7 +536,12 @@ export const Layout = () => {
             onClick={toggleSidebar}
             aria-label="Open full menu drawer"
           >
-            <span className="mobile-nav-icon">☰</span>
+            <div className="mobile-nav-icon-wrap">
+              <span className="mobile-nav-icon">☰</span>
+              {xboxStatus?.state === 'running' && (
+                <span className="mobile-nav-badge-dot live" title="Xbox Relay active" />
+              )}
+            </div>
             <span className="mobile-nav-label">Menu</span>
           </button>
         </nav>

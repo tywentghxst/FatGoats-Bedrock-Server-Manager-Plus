@@ -5628,6 +5628,10 @@ html, body, #root {
 
 /* Prevent iOS WebKit Auto-Zoom on form inputs */
 @media (max-width: 768px) {
+  *, *::before, *::after {
+    -webkit-tap-highlight-color: transparent;
+  }
+
   input, textarea, select {
     font-size: 16px !important;
   }
@@ -5649,14 +5653,14 @@ html, body, #root {
     bottom: 0;
     left: 0;
     right: 0;
-    height: 60px;
-    background: rgba(9, 14, 24, 0.94);
-    backdrop-filter: blur(20px);
-    -webkit-backdrop-filter: blur(20px);
+    height: 62px;
+    background: rgba(8, 13, 23, 0.95);
+    backdrop-filter: blur(28px);
+    -webkit-backdrop-filter: blur(28px);
     border-top: 1px solid rgba(255, 255, 255, 0.08);
-    box-shadow: 0 -4px 25px rgba(0, 0, 0, 0.6);
-    z-index: 50;
-    padding: 0 0.5rem;
+    box-shadow: 0 -8px 32px rgba(0, 0, 0, 0.65), 0 -1px 0 rgba(255, 255, 255, 0.05);
+    z-index: 100;
+    padding: 0 0.35rem;
     padding-bottom: env(safe-area-inset-bottom, 0px);
   }
 
@@ -5670,21 +5674,23 @@ html, body, #root {
     border: none;
     color: #94a3b8;
     text-decoration: none;
-    padding: 0.35rem 0.65rem;
-    border-radius: 10px;
+    padding: 0.35rem 0.4rem;
+    border-radius: 12px;
     cursor: pointer;
     transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
     flex: 1;
     min-height: 48px;
-    -webkit-tap-highlight-color: transparent;
+    position: relative;
+    user-select: none;
   }
 
   .mobile-nav-item:active {
-    transform: scale(0.94);
+    transform: scale(0.92);
   }
 
   .mobile-nav-item.active {
     color: #34d399;
+    background: rgba(16, 185, 129, 0.08);
   }
 
   .mobile-nav-icon-wrap {
@@ -5697,27 +5703,28 @@ html, body, #root {
   .mobile-nav-icon {
     font-size: 1.25rem;
     line-height: 1;
-    transition: transform 0.2s ease;
+    transition: transform 0.2s ease, filter 0.2s ease;
   }
 
   .mobile-nav-item.active .mobile-nav-icon {
-    transform: translateY(-1px);
-    filter: drop-shadow(0 0 6px rgba(16, 185, 129, 0.5));
+    transform: translateY(-1.5px) scale(1.08);
+    filter: drop-shadow(0 0 8px rgba(16, 185, 129, 0.6));
   }
 
   .mobile-nav-badge-dot {
     position: absolute;
     top: -2px;
     right: -4px;
-    width: 7px;
-    height: 7px;
+    width: 8px;
+    height: 8px;
     border-radius: 50%;
-    border: 1.5px solid #090e18;
+    border: 1.5px solid #080d17;
   }
 
   .mobile-nav-badge-dot.live {
     background: #10b981;
-    box-shadow: 0 0 6px #10b981;
+    box-shadow: 0 0 8px #10b981;
+    animation: pulseDot 1.4s infinite ease-in-out;
   }
 
   .mobile-nav-badge-dot.ready {
@@ -5731,13 +5738,19 @@ html, body, #root {
     line-height: 1;
   }
 
+  .mobile-nav-item.active .mobile-nav-label {
+    font-weight: 700;
+  }
+
   .mobile-nav-menu-btn {
     font-family: inherit;
   }
 
-  /* Main content offset to prevent bottom nav overlap */
+  /* Main content offset to prevent bottom dock overlap */
   .content-container {
-    padding: 0.85rem 0.85rem calc(4.75rem + env(safe-area-inset-bottom, 0px)) 0.85rem !important;
+    padding: 0.85rem 0.75rem calc(72px + env(safe-area-inset-bottom, 0px)) 0.75rem !important;
+    max-width: 100vw !important;
+    overflow-x: hidden !important;
   }
 }
 
@@ -5746,30 +5759,47 @@ html, body, #root {
    -------------------------------------------------------------------------- */
 @media (max-width: 768px) {
   .top-header {
-    height: 54px;
+    height: 56px;
     padding: 0 0.85rem;
     gap: 0.5rem;
+    background: rgba(10, 15, 26, 0.92);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    position: sticky;
+    top: 0;
+    z-index: 40;
   }
 
   .header-left {
     gap: 0.65rem;
     min-width: 0;
     flex: 1;
+    display: flex;
+    align-items: center;
   }
 
   .mobile-toggle-btn {
     width: 38px;
     height: 38px;
+    min-width: 38px;
     padding: 0;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    font-size: 1.2rem;
-    background: rgba(255, 255, 255, 0.05);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 8px;
+    font-size: 1.15rem;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 10px;
     color: #f1f5f9;
     flex-shrink: 0;
+    cursor: pointer;
+    transition: all 0.2s ease;
+  }
+
+  .mobile-toggle-btn:active {
+    transform: scale(0.92);
+    background: rgba(255, 255, 255, 0.12);
   }
 
   .header-breadcrumbs {
@@ -5783,13 +5813,14 @@ html, body, #root {
   }
 
   .crumb-current {
-    font-size: 0.95rem;
+    font-size: 0.92rem;
     font-weight: 700;
-    color: #f1f5f9;
+    color: #f8fafc;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
     display: block;
+    letter-spacing: -0.01em;
   }
 
   .header-center {
@@ -5800,9 +5831,10 @@ html, body, #root {
   }
 
   .server-status-pill {
-    padding: 0.25rem 0.55rem;
+    padding: 0.25rem 0.5rem;
     font-size: 0.72rem;
-    gap: 0.4rem;
+    gap: 0.35rem;
+    border-radius: 9999px;
   }
 
   /* Compact pill text on small mobile */
@@ -5818,12 +5850,11 @@ html, body, #root {
   .header-master-controls {
     display: flex;
     align-items: center;
-    gap: 0.25rem;
-    margin-left: 0.2rem;
+    gap: 0.3rem;
   }
 
   .btn-header-power {
-    padding: 0.3rem !important;
+    padding: 0 !important;
     width: 34px !important;
     height: 34px !important;
     min-width: 34px !important;
@@ -5832,6 +5863,11 @@ html, body, #root {
     justify-content: center !important;
     border-radius: 9px !important;
     font-size: 0.8rem !important;
+    transition: transform 0.15s ease;
+  }
+
+  .btn-header-power:active {
+    transform: scale(0.92);
   }
 
   .btn-header-power span:not(.header-btn-icon) {
@@ -5839,7 +5875,7 @@ html, body, #root {
   }
 
   .btn-header-power .header-btn-icon {
-    font-size: 0.88rem !important;
+    font-size: 0.85rem !important;
     margin: 0 !important;
     line-height: 1 !important;
   }
@@ -5847,18 +5883,26 @@ html, body, #root {
   .header-right {
     gap: 0.35rem;
     flex-shrink: 0;
+    display: flex;
+    align-items: center;
   }
 
   .header-user-actions {
+    display: flex;
+    align-items: center;
     gap: 0.35rem;
   }
 
   .header-user-actions .btn-warning {
-    padding: 0.25rem 0.45rem !important;
-    font-size: 0.72rem !important;
-    min-width: 32px !important;
-    height: 32px !important;
+    padding: 0 !important;
+    width: 34px !important;
+    height: 34px !important;
+    min-width: 34px !important;
+    font-size: 0.85rem !important;
+    display: inline-flex !important;
+    align-items: center !important;
     justify-content: center !important;
+    border-radius: 9px !important;
   }
 
   .header-user-actions .btn-warning span:last-child {
@@ -5866,20 +5910,24 @@ html, body, #root {
   }
 
   .user-pill-chip {
-    padding: 0.2rem 0.45rem 0.2rem 0.2rem;
+    padding: 0;
+    background: transparent;
+    border: none;
   }
 
   .user-pill-chip .chip-name {
     display: none;
   }
 
-  .btn-logout {
-    padding: 0.35rem 0.55rem;
-    font-size: 0.75rem;
+  .user-pill-chip .chip-avatar {
+    width: 32px;
+    height: 32px;
+    font-size: 0.82rem;
+    font-weight: 700;
   }
 
-  .btn-logout span:last-child {
-    display: none;
+  .btn-logout {
+    display: none; /* Managed in sidebar drawer and settings */
   }
 }
 
@@ -5889,12 +5937,13 @@ html, body, #root {
 @media (max-width: 1024px) {
   .sidebar {
     width: 290px;
-    max-width: 85vw;
+    max-width: 84vw;
     background: rgba(11, 17, 28, 0.98);
-    backdrop-filter: blur(24px);
-    -webkit-backdrop-filter: blur(24px);
+    backdrop-filter: blur(28px);
+    -webkit-backdrop-filter: blur(28px);
     border-right: 1px solid rgba(255, 255, 255, 0.1);
     padding-bottom: calc(1rem + env(safe-area-inset-bottom, 0px));
+    box-shadow: 10px 0 35px rgba(0, 0, 0, 0.7);
   }
 
   .sidebar-brand {
@@ -5903,36 +5952,36 @@ html, body, #root {
   }
 
   .sidebar-close-btn {
-    width: 36px;
-    height: 36px;
+    width: 38px;
+    height: 38px;
     display: flex;
     align-items: center;
     justify-content: center;
     background: rgba(255, 255, 255, 0.06);
     border: 1px solid rgba(255, 255, 255, 0.12);
-    border-radius: 8px;
+    border-radius: 10px;
     color: #cbd5e1;
-    font-size: 1rem;
+    font-size: 1.1rem;
     cursor: pointer;
   }
 
   .sidebar-nav {
     padding: 0.85rem;
-    gap: 0.3rem;
+    gap: 0.35rem;
   }
 
   .nav-link {
-    padding: 0.65rem 0.85rem;
+    padding: 0.7rem 0.9rem;
     font-size: 0.88rem;
-    border-radius: 10px;
-    min-height: 44px;
+    border-radius: 12px;
+    min-height: 46px;
   }
 
   .sidebar-user-card {
     margin: 0.85rem;
-    padding: 0.75rem 0.85rem;
+    padding: 0.85rem 1rem;
     background: rgba(255, 255, 255, 0.04);
-    border-radius: 12px;
+    border-radius: 14px;
     border: 1px solid rgba(255, 255, 255, 0.08);
   }
 }
@@ -5990,12 +6039,12 @@ html, body, #root {
 }
 
 /* --------------------------------------------------------------------------
-   Hero Status Bar - Mobile Scaling
+   Hero Status Bar & Power Controls - Mobile Scaling
    -------------------------------------------------------------------------- */
 @media (max-width: 768px) {
   .hero-status-panel {
-    padding: 1rem;
-    border-radius: 12px;
+    padding: 1.15rem 1rem;
+    border-radius: 14px;
     margin-bottom: 1rem;
   }
 
@@ -6006,17 +6055,20 @@ html, body, #root {
   }
 
   .hero-status-identity {
-    gap: 0.75rem;
+    gap: 0.85rem;
+    align-items: flex-start;
   }
 
   .hero-state-title {
-    font-size: 1.05rem;
+    font-size: 1.1rem;
+    font-weight: 800;
   }
 
   .hero-engine-desc {
-    font-size: 0.74rem;
+    font-size: 0.75rem;
     flex-wrap: wrap;
     gap: 0.25rem 0.45rem;
+    margin-top: 0.25rem;
   }
 
   .hero-meta-strip {
@@ -6024,32 +6076,40 @@ html, body, #root {
     grid-template-columns: repeat(2, 1fr) !important;
     gap: 0.5rem !important;
     width: 100% !important;
-    margin-top: 0.5rem !important;
-  }
-
-  .meta-pill {
-    padding: 0.55rem 0.75rem;
-    border-radius: 10px;
-  }
-
-  .meta-highlight {
-    font-size: 0.95rem;
-  }
-
-  .hero-action-buttons {
-    display: grid !important;
-    grid-template-columns: repeat(2, 1fr) !important;
-    gap: 0.55rem !important;
-    width: 100% !important;
     margin-top: 0.75rem !important;
   }
 
+  .meta-pill {
+    padding: 0.6rem 0.75rem;
+    border-radius: 10px;
+    background: rgba(0, 0, 0, 0.25);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+  }
+
+  .meta-highlight {
+    font-size: 0.92rem;
+    font-weight: 700;
+  }
+
+  /* Fixed Hero Control Buttons Grid on Mobile */
+  .hero-control-buttons,
+  .hero-action-buttons {
+    display: grid !important;
+    grid-template-columns: repeat(2, 1fr) !important;
+    gap: 0.5rem !important;
+    width: 100% !important;
+    margin-top: 0.85rem !important;
+  }
+
+  .hero-control-buttons .btn,
+  .hero-control-buttons .btn-power,
   .hero-action-buttons .btn,
   .hero-action-buttons .btn-power {
     width: 100% !important;
     min-height: 44px !important;
     font-size: 0.82rem !important;
-    padding: 0.5rem 0.65rem !important;
+    font-weight: 700 !important;
+    padding: 0.55rem 0.65rem !important;
     display: flex !important;
     align-items: center !important;
     justify-content: center !important;
@@ -6057,6 +6117,12 @@ html, body, #root {
     border-radius: 10px !important;
     box-sizing: border-box !important;
     white-space: nowrap !important;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+  }
+
+  .hero-control-buttons .btn:active,
+  .hero-control-buttons .btn-power:active {
+    transform: scale(0.96);
   }
 }
 
@@ -6073,7 +6139,7 @@ html, body, #root {
 
   .telemetry-card {
     padding: 0.85rem;
-    border-radius: 12px;
+    border-radius: 14px;
     min-height: auto;
   }
 
@@ -6083,7 +6149,7 @@ html, body, #root {
   }
 
   .telemetry-icon-badge {
-    font-size: 1rem;
+    font-size: 1.1rem;
   }
 
   .telemetry-main-metric {
@@ -6091,7 +6157,7 @@ html, body, #root {
   }
 
   .metric-number {
-    font-size: 1.4rem;
+    font-size: 1.45rem;
     font-weight: 800;
   }
 
@@ -6100,7 +6166,8 @@ html, body, #root {
   }
 
   .telemetry-meter-bar {
-    height: 4px;
+    height: 5px;
+    border-radius: 9999px;
     margin: 0.35rem 0;
   }
 
@@ -6111,27 +6178,36 @@ html, body, #root {
 
   .quick-hub-grid {
     display: grid;
-    grid-template-columns: repeat(2, 1fr);
+    grid-template-columns: 1fr;
     gap: 0.65rem;
   }
 
   .hub-tile {
-    padding: 0.85rem;
-    border-radius: 12px;
+    padding: 0.9rem;
+    border-radius: 14px;
+    min-height: 48px;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
   }
 
   .tile-icon-box {
-    width: 36px;
-    height: 36px;
-    font-size: 1.1rem;
+    width: 38px;
+    height: 38px;
+    font-size: 1.15rem;
+    border-radius: 10px;
+    flex-shrink: 0;
   }
 
-  .tile-title {
-    font-size: 0.85rem;
+  .tile-heading {
+    font-size: 0.88rem;
+    font-weight: 700;
+    margin-bottom: 2px;
   }
 
-  .tile-desc {
-    font-size: 0.7rem;
+  .tile-description {
+    font-size: 0.72rem;
+    line-height: 1.35;
     display: -webkit-box;
     -webkit-line-clamp: 2;
     -webkit-box-orient: vertical;
@@ -6147,15 +6223,15 @@ html, body, #root {
   .time-btn-grid {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
-    gap: 0.4rem;
+    gap: 0.45rem;
   }
 
   .btn-weather,
   .btn-time {
-    min-height: 44px;
+    min-height: 46px;
     font-size: 0.78rem;
     padding: 0.45rem 0.35rem;
-    border-radius: 8px;
+    border-radius: 10px;
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -6248,23 +6324,27 @@ html, body, #root {
   }
 
   .terminal-window {
-    height: calc(100vh - 310px);
-    min-height: 280px;
-    max-height: 460px;
-    padding: 0.75rem;
-    border-radius: 12px;
+    height: calc(100vh - 290px) !important;
+    min-height: 260px !important;
+    max-height: 480px !important;
+    padding: 0.75rem !important;
+    border-radius: 14px !important;
   }
 
   .log-line {
-    font-size: 0.74rem;
-    line-height: 1.45;
-    word-break: break-word;
+    font-size: 0.74rem !important;
+    line-height: 1.45 !important;
+    word-break: break-word !important;
+  }
+
+  .console-quick-chips {
+    padding: 0.25rem 0.1rem 0.5rem !important;
   }
 
   .console-command-form {
-    padding: 0.45rem 0.65rem;
-    border-radius: 12px;
-    gap: 0.5rem;
+    padding: 0.45rem 0.65rem !important;
+    border-radius: 12px !important;
+    gap: 0.5rem !important;
   }
 
   .command-prompt-symbol {
@@ -6274,13 +6354,13 @@ html, body, #root {
 
   .command-input {
     font-size: 16px !important;
-    padding: 0.5rem 0;
+    padding: 0.5rem 0 !important;
   }
 
   .console-command-form .btn {
-    min-height: 40px;
-    padding: 0 1rem;
-    font-weight: 700;
+    min-height: 40px !important;
+    padding: 0 1.15rem !important;
+    font-weight: 700 !important;
   }
 }
 
@@ -6289,7 +6369,7 @@ html, body, #root {
    -------------------------------------------------------------------------- */
 @media (max-width: 768px) {
   .xbox-account-banner {
-    border-radius: 12px;
+    border-radius: 14px;
     margin-bottom: 1rem;
   }
 
@@ -6402,7 +6482,7 @@ html, body, #root {
   }
 
   .modern-card {
-    border-radius: 12px;
+    border-radius: 14px;
   }
 
   .card-body.p-5 {
@@ -6419,19 +6499,271 @@ html, body, #root {
 }
 
 /* --------------------------------------------------------------------------
+   Addons & Mods Mobile Engine Overhaul
+   -------------------------------------------------------------------------- */
+@media (max-width: 768px) {
+  .addons-metrics-row {
+    display: grid !important;
+    grid-template-columns: 1fr !important;
+    gap: 0.65rem !important;
+    margin-bottom: 1rem !important;
+  }
+
+  .metric-glass-card {
+    padding: 0.85rem 1rem !important;
+    border-radius: 14px !important;
+  }
+
+  .settings-nav-tabs {
+    display: flex !important;
+    gap: 0.4rem !important;
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch !important;
+    scrollbar-width: none !important;
+    padding: 0.35rem !important;
+    margin-bottom: 1rem !important;
+    border-radius: 14px !important;
+  }
+
+  .settings-nav-tabs::-webkit-scrollbar {
+    display: none !important;
+  }
+
+  .settings-tab-btn {
+    padding: 0.55rem 0.85rem !important;
+    font-size: 0.78rem !important;
+    white-space: nowrap !important;
+    flex-shrink: 0 !important;
+    min-height: 42px !important;
+    border-radius: 10px !important;
+  }
+
+  .upload-zone-modern {
+    padding: 0 !important;
+    border-radius: 14px !important;
+  }
+
+  .upload-zone-inner {
+    padding: 1.25rem 1rem !important;
+  }
+
+  .upload-animated-icon {
+    font-size: 2rem !important;
+    margin-bottom: 0.5rem !important;
+  }
+
+  .upload-main-title {
+    font-size: 1rem !important;
+    margin-bottom: 0.25rem !important;
+  }
+
+  .upload-sub-desc {
+    font-size: 0.74rem !important;
+    margin-bottom: 0.85rem !important;
+  }
+
+  .upload-zone-inner .btn {
+    width: 100% !important;
+    min-height: 44px !important;
+  }
+
+  .addon-controls-bar {
+    padding: 0.85rem !important;
+    border-radius: 14px !important;
+  }
+
+  .addon-controls-bar .d-flex.justify-between {
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: 0.65rem !important;
+  }
+
+  .search-input-wrap {
+    width: 100% !important;
+    min-width: 0 !important;
+  }
+
+  .addon-controls-bar .d-flex.items-center.gap-2 {
+    display: grid !important;
+    grid-template-columns: 1fr 1fr !important;
+    gap: 0.45rem !important;
+    width: 100% !important;
+  }
+
+  .addon-controls-bar select {
+    width: 100% !important;
+    height: 40px !important;
+    font-size: 16px !important;
+  }
+
+  .addon-controls-bar .btn {
+    width: 100% !important;
+    min-height: 40px !important;
+    font-size: 0.76rem !important;
+    justify-content: center !important;
+  }
+
+  .batch-selection-toolbar {
+    padding: 0.75rem 0.85rem !important;
+    border-radius: 14px !important;
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: 0.65rem !important;
+  }
+
+  .batch-selection-toolbar .d-flex {
+    width: 100% !important;
+    justify-content: space-between !important;
+  }
+
+  .batch-selection-toolbar .btn {
+    flex: 1 !important;
+    min-height: 38px !important;
+  }
+
+  /* Addons Grid & Modern Cards */
+  .addon-grid,
+  .addon-grid-modern {
+    grid-template-columns: 1fr !important;
+    gap: 0.85rem !important;
+  }
+
+  .modern-addon-card {
+    padding: 1rem !important;
+    border-radius: 16px !important;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3) !important;
+  }
+
+  .addon-card-top {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    gap: 0.5rem !important;
+    margin-bottom: 0.65rem !important;
+  }
+
+  .addon-icon-wrap {
+    width: 48px !important;
+    height: 48px !important;
+    border-radius: 10px !important;
+    flex-shrink: 0 !important;
+  }
+
+  .addon-main-title {
+    font-size: 1.05rem !important;
+    font-weight: 700 !important;
+    line-height: 1.3 !important;
+  }
+
+  .addon-card-desc {
+    font-size: 0.75rem !important;
+    line-height: 1.4 !important;
+    margin-bottom: 0.75rem !important;
+    display: -webkit-box !important;
+    -webkit-line-clamp: 2 !important;
+    -webkit-box-orient: vertical !important;
+    overflow: hidden !important;
+  }
+
+  .addon-details-strip {
+    padding: 0.55rem 0.75rem !important;
+    border-radius: 8px !important;
+    margin-bottom: 0.85rem !important;
+  }
+
+  /* Addon card action buttons: 2-tier touch layout */
+  .addon-card-actions {
+    display: flex !important;
+    flex-wrap: wrap !important;
+    gap: 0.45rem !important;
+    margin-top: auto !important;
+  }
+
+  .addon-card-actions > .btn {
+    flex: 1 1 100% !important;
+    min-height: 42px !important;
+    font-size: 0.85rem !important;
+    font-weight: 700 !important;
+    border-radius: 10px !important;
+  }
+
+  .addon-card-actions > .btn-icon-modern {
+    flex: 1 !important;
+    min-height: 40px !important;
+    min-width: 40px !important;
+    border-radius: 9px !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    font-size: 1rem !important;
+    background: rgba(255, 255, 255, 0.06) !important;
+    border: 1px solid rgba(255, 255, 255, 0.12) !important;
+  }
+
+  .addon-card-actions > .btn-icon-modern:active {
+    transform: scale(0.92) !important;
+  }
+
+  /* Mode 2: Reorder Items on Mobile */
+  .pack-item-modern {
+    padding: 0.65rem 0.75rem !important;
+    border-radius: 12px !important;
+    gap: 0.5rem !important;
+  }
+
+  .pack-drag-handle {
+    display: none !important; /* Touch buttons ▲ ▼ are used */
+  }
+
+  .pack-item-icon-wrap {
+    width: 38px !important;
+    height: 38px !important;
+    border-radius: 8px !important;
+  }
+
+  .pack-order-controls {
+    gap: 0.3rem !important;
+  }
+
+  .btn-order-arrow {
+    width: 36px !important;
+    height: 36px !important;
+    font-size: 0.9rem !important;
+    border-radius: 8px !important;
+  }
+
+  /* Mode 3: Suggestions & Swaps */
+  .suggestion-card {
+    padding: 1rem !important;
+    border-radius: 14px !important;
+  }
+
+  .suggestion-actions {
+    flex-direction: column !important;
+    gap: 0.5rem !important;
+    width: 100% !important;
+  }
+
+  .suggestion-actions .btn {
+    width: 100% !important;
+    min-height: 42px !important;
+  }
+}
+
+/* --------------------------------------------------------------------------
    Players, Backups, Worlds & Mod Tables - Responsive Scroll & Cards
    -------------------------------------------------------------------------- */
 @media (max-width: 768px) {
   .player-stats-grid {
-    display: grid;
-    grid-template-columns: repeat(2, 1fr);
-    gap: 0.65rem;
-    margin-bottom: 1rem;
+    display: grid !important;
+    grid-template-columns: repeat(2, 1fr) !important;
+    gap: 0.55rem !important;
+    margin-bottom: 1rem !important;
   }
 
   .player-stat-card {
-    padding: 0.75rem;
-    border-radius: 12px;
+    padding: 0.75rem 0.85rem !important;
+    border-radius: 12px !important;
   }
 
   .stat-icon-wrapper {
@@ -6480,7 +6812,7 @@ html, body, #root {
   .table-responsive {
     overflow-x: auto !important;
     -webkit-overflow-scrolling: touch !important;
-    border-radius: 12px !important;
+    border-radius: 14px !important;
     max-width: 100% !important;
     margin-bottom: 1rem;
     box-shadow: inset -6px 0 8px -6px rgba(0, 0, 0, 0.4);
@@ -6495,6 +6827,16 @@ html, body, #root {
     white-space: nowrap !important;
   }
 
+  .player-name-cell {
+    gap: 0.65rem !important;
+  }
+
+  .player-avatar {
+    width: 34px !important;
+    height: 34px !important;
+    font-size: 0.85rem !important;
+  }
+
   .header-actions-group {
     display: flex;
     gap: 0.5rem;
@@ -6506,18 +6848,6 @@ html, body, #root {
     flex: 1;
     min-height: 42px;
     justify-content: center;
-  }
-
-  /* Addons & Mods Grid */
-  .addon-grid,
-  .addon-grid-modern {
-    grid-template-columns: 1fr !important;
-    gap: 0.85rem !important;
-  }
-
-  .modern-addon-card {
-    padding: 1rem !important;
-    border-radius: 14px !important;
   }
 
   /* Worlds Grid */
@@ -6537,6 +6867,53 @@ html, body, #root {
     gap: 0.85rem !important;
   }
 
+  .prop-modern-card {
+    border-radius: 14px !important;
+    padding: 1rem !important;
+  }
+
+  .prop-card-head {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    gap: 0.45rem !important;
+  }
+
+  .properties-nav-bar {
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: 0.65rem !important;
+  }
+
+  .category-tabs-group {
+    display: flex !important;
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch !important;
+    scrollbar-width: none !important;
+    padding-bottom: 0.25rem !important;
+    width: 100% !important;
+  }
+
+  .category-tabs-group::-webkit-scrollbar {
+    display: none !important;
+  }
+
+  .cat-tab-btn {
+    white-space: nowrap !important;
+    flex-shrink: 0 !important;
+    padding: 0.5rem 0.85rem !important;
+    min-height: 40px !important;
+  }
+
+  .prop-search-wrapper {
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+
+  .search-field-pill {
+    width: 100% !important;
+    font-size: 16px !important;
+  }
+
   /* BDS Versions Grid */
   .version-cards-grid {
     grid-template-columns: 1fr !important;
@@ -6554,31 +6931,6 @@ html, body, #root {
     padding: 1rem !important;
   }
 
-  /* Settings Navigation Bar - Smooth Touch Pill Slider */
-  .settings-nav-tabs {
-    display: flex !important;
-    gap: 0.45rem !important;
-    overflow-x: auto !important;
-    -webkit-overflow-scrolling: touch !important;
-    scrollbar-width: none !important;
-    padding: 0.35rem !important;
-    margin-bottom: 1rem !important;
-    border-radius: 14px !important;
-  }
-
-  .settings-nav-tabs::-webkit-scrollbar {
-    display: none !important;
-  }
-
-  .settings-tab-btn {
-    padding: 0.55rem 0.85rem !important;
-    font-size: 0.8rem !important;
-    white-space: nowrap !important;
-    flex-shrink: 0 !important;
-    min-height: 42px !important;
-    border-radius: 10px !important;
-  }
-
   /* Portal Section Customizer Reorder Items */
   .portal-section-reorder-item {
     flex-direction: column !important;
@@ -6594,16 +6946,16 @@ html, body, #root {
 
   /* Mobile Modals */
   .modal-container {
-    padding: 0.75rem !important;
+    padding: 0.65rem !important;
   }
 
   .modal-card {
     width: 100% !important;
-    max-width: 95vw !important;
-    border-radius: 16px !important;
-    max-height: 90vh !important;
+    max-width: 96vw !important;
+    border-radius: 18px !important;
+    max-height: 88vh !important;
     overflow-y: auto !important;
-    padding: 1.25rem !important;
+    padding: 1.25rem 1rem !important;
   }
 
   .modal-footer {
@@ -7389,7 +7741,7 @@ html, body, #root {
    -------------------------------------------------------------------------- */
 @media (max-width: 480px) {
   .content-container {
-    padding: 0.65rem 0.55rem calc(4.75rem + env(safe-area-inset-bottom, 0px)) 0.55rem !important;
+    padding: 0.65rem 0.5rem calc(72px + env(safe-area-inset-bottom, 0px)) 0.5rem !important;
   }
 
   .page-main-title {
@@ -7423,7 +7775,7 @@ html, body, #root {
   }
 
   .metric-number {
-    font-size: 1.2rem !important;
+    font-size: 1.25rem !important;
   }
 
   .quick-hub-grid {
@@ -7431,15 +7783,19 @@ html, body, #root {
     gap: 0.55rem !important;
   }
 
+  .hero-control-buttons,
   .hero-action-buttons {
     grid-template-columns: 1fr 1fr !important;
-    gap: 0.45rem !important;
+    gap: 0.4rem !important;
   }
 
+  .hero-control-buttons .btn,
+  .hero-control-buttons .btn-power,
   .hero-action-buttons .btn,
   .hero-action-buttons .btn-power {
     font-size: 0.78rem !important;
     padding: 0.45rem 0.5rem !important;
+    min-height: 40px !important;
   }
 
   .tunnel-address-banner {
@@ -7472,7 +7828,7 @@ html, body, #root {
   }
 
   .terminal-window {
-    height: calc(100vh - 330px) !important;
+    height: calc(100vh - 310px) !important;
     min-height: 240px !important;
   }
 
@@ -7487,7 +7843,22 @@ html, body, #root {
   .portal-addons-grid {
     grid-template-columns: 1fr !important;
   }
+
+  .addon-card-actions {
+    gap: 0.35rem !important;
+  }
+
+  .addon-card-actions > .btn {
+    min-height: 40px !important;
+    font-size: 0.8rem !important;
+  }
+
+  .addon-card-actions > .btn-icon-modern {
+    min-height: 38px !important;
+    min-width: 38px !important;
+  }
 }
+
 
 
 

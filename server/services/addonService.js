@@ -1258,6 +1258,90 @@ async function executeBulk(action, targetUuids = null, options = {}) {
   throw new Error(`Unknown bulk action: ${action}`);
 }
 
+/**
+ * Search the web (using DuckDuckGo HTML) for addon URLs, images, snippets, and site metadata.
+ * Enriches results with open graph images and site favicons.
+ */
+async function searchAddonUrl(query) {
+  try {
+    const searchTerms = `${query} minecraft bedrock addon`;
+    const ddgUrl = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(searchTerms)}`;
+    const res = await fetch(ddgUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
+      },
+      signal: AbortSignal.timeout(6000)
+    });
+
+    if (!res.ok) {
+      return [];
+    }
+
+    const html = await res.text();
+    const rawResults = [];
+
+    // Match DDG results
+    const titleRegex = /<h2 class="result__title">[\s\S]*?<a rel="nofollow" class="result__a" href="([^"]+)"[^>]*>([\s\S]*?)<\/a>[\s\S]*?<\/h2>[\s\S]*?<a class="result__snippet[^"]*"[^>]*>([\s\S]*?)<\/a>/gi;
+    let match;
+    while ((match = titleRegex.exec(html)) !== null && rawResults.length < 6) {
+      let rawHref = match[1];
+      if (rawHref.includes('uddg=')) {
+        try {
+          rawHref = decodeURIComponent(rawHref.split('uddg=')[1].split('&')[0]);
+        } catch (_) {}
+      }
+      const title = match[2].replace(/<[^>]+>/g, '').trim();
+      const snippet = match[3].replace(/<[^>]+>/g, '').trim();
+
+      if (rawHref.startsWith('http')) {
+        rawResults.push({ url: rawHref, title, snippet });
+      }
+    }
+
+    // Enrich top results with OG images / site names
+    const enriched = await Promise.all(rawResults.map(async (item) => {
+      let image = null;
+      let siteName = '';
+      try {
+        const u = new URL(item.url);
+        siteName = u.hostname.replace(/^www\./, '');
+        const pageRes = await fetch(item.url, {
+          headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+          signal: AbortSignal.timeout(3000)
+        });
+        if (pageRes.ok) {
+          const pageHtml = await pageRes.text();
+          const ogMatch = pageHtml.match(/<meta[^>]*property=["']og:image["'][^>]*content=["']([^"']+)["']/i) ||
+                          pageHtml.match(/<meta[^>]*content=["']([^"']+)["'][^>]*property=["']og:image["']/i) ||
+                          pageHtml.match(/<meta[^>]*name=["']twitter:image["'][^>]*content=["']([^"']+)["']/i);
+          if (ogMatch && ogMatch[1] && ogMatch[1].startsWith('http')) {
+            image = ogMatch[1];
+          }
+        }
+      } catch (_) {}
+
+      if (!image) {
+        try {
+          const u = new URL(item.url);
+          image = `https://www.google.com/s2/favicons?domain=${u.hostname}&sz=128`;
+        } catch (_) {}
+      }
+
+      return {
+        ...item,
+        image,
+        siteName
+      };
+    }));
+
+    return enriched;
+  } catch (err) {
+    console.warn('[AddonService] Error during searchAddonUrl:', err.message);
+    return [];
+  }
+}
+
 module.exports = {
   processAddonUpload,
   getPackIconPath,
@@ -1269,5 +1353,7 @@ module.exports = {
   setActiveAddons,
   runDiagnostics,
   executeAutoFix,
-  executeBulk
+  executeBulk,
+  searchAddonUrl
 };
+

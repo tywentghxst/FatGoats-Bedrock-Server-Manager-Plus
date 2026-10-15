@@ -142,6 +142,8 @@ export const Addons = {
   },
   scan: () => request('POST', '/api/addons/scan'),
   updateMetadata: (uuid, data) => request('PUT', `/api/addons/${encodeURIComponent(uuid)}`, data),
+  searchUrl: (query, uuid) =>
+    request('GET', `/api/addons/search-url?query=${encodeURIComponent(query || '')}&uuid=${encodeURIComponent(uuid || '')}`),
   delete: (uuid, options = {}) =>
     request('DELETE', `/api/addons/${encodeURIComponent(uuid)}${options.deleteCompanion ? '?deleteCompanion=true' : ''}`),
   getActive: () => request('GET', '/api/addons/active'),

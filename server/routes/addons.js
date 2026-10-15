@@ -3,12 +3,49 @@ const fs = require('fs');
 const path = require('path');
 const multer = require('multer');
 const config = require('../config');
+const db = require('../database');
 const { authenticate, requireAdmin } = require('../middleware/auth');
 const addonService = require('../services/addonService');
 const { logAudit } = require('../services/auditService');
 const { parseProperties } = require('../utils/propertyParser');
 
 const router = express.Router();
+
+/**
+ * GET /search-url
+ * (authenticate, requireAdmin) Search the web for addon URLs, images, titles, and snippets
+ */
+router.get('/search-url', authenticate, requireAdmin, async (req, res) => {
+  try {
+    let query = (req.query.query || '').trim();
+    const uuid = req.query.uuid;
+
+    if (!query && uuid) {
+      const addon = db.prepare('SELECT name, display_name, original_filename FROM addons WHERE uuid = ?').get(uuid);
+      if (addon) {
+        query = (addon.display_name && addon.display_name !== 'pack.name')
+          ? addon.display_name
+          : (addon.name && addon.name !== 'pack.name' ? addon.name : (addon.original_filename || ''));
+      }
+    }
+
+    if (!query) {
+      return res.status(400).json({ error: 'Search query or valid addon UUID is required' });
+    }
+
+    // Sanitize query for cleaner search
+    const cleanQuery = query
+      .replace(/\.(mcaddon|mcpack|zip)$/i, '')
+      .replace(/\s*(addon|\(addon\)|pack|\(pack\)|behavior|resource|bp|rp)$/i, '')
+      .trim();
+
+    const results = await addonService.searchAddonUrl(cleanQuery);
+    return res.json({ query: cleanQuery, results });
+  } catch (err) {
+    console.error('[AddonsRoute] Error searching addon URL:', err);
+    return res.status(500).json({ error: 'Failed to search for addon URL', details: err.message });
+  }
+});
 
 // Ensure upload directory exists
 if (!fs.existsSync(config.UPLOAD_DIR)) {

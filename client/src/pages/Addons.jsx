@@ -95,6 +95,19 @@ export const Addons = () => {
   const [draggedItem, setDraggedItem] = useState(null); // { index, type: 'bp' | 'rp' }
   const [dragOverIndex, setDragOverIndex] = useState(null);
 
+  // URL Finder Wizard State (for uploaded packs and manual search)
+  const [urlWizardOpen, setUrlWizardOpen] = useState(false);
+  const [urlWizardQueue, setUrlWizardQueue] = useState([]);
+  const [urlWizardIndex, setUrlWizardIndex] = useState(0);
+  const [urlWizardQuery, setUrlWizardQuery] = useState('');
+  const [urlWizardSearching, setUrlWizardSearching] = useState(false);
+  const [urlWizardResults, setUrlWizardResults] = useState([]);
+  const [urlWizardCustomUrl, setUrlWizardCustomUrl] = useState('');
+  const [urlWizardSaving, setUrlWizardSaving] = useState(false);
+  const [urlWizardError, setUrlWizardError] = useState(null);
+  const [urlWizardSuccess, setUrlWizardSuccess] = useState(null);
+  const [urlWizardAutoSearchingAll, setUrlWizardAutoSearchingAll] = useState(false);
+
   // Diagnostics Engine state (Mode 3)
   const [diagnosticsReport, setDiagnosticsReport] = useState(null);
   const [loadingDiagnostics, setLoadingDiagnostics] = useState(false);
@@ -246,12 +259,16 @@ export const Addons = () => {
 
     let successCount = 0;
     const errors = [];
+    const allProcessed = [];
 
     for (let i = 0; i < validFiles.length; i++) {
       const file = validFiles[i];
       try {
-        await api.Addons.upload(file);
+        const res = await api.Addons.upload(file);
         successCount++;
+        if (res && res.addons && Array.isArray(res.addons)) {
+          allProcessed.push(...res.addons);
+        }
       } catch (err) {
         console.error(`Failed to upload ${file.name}:`, err);
         errors.push(`${file.name}: ${err.message || 'Upload failed'}`);
@@ -271,6 +288,167 @@ export const Addons = () => {
     await loadData();
     if (engineMode === 'diagnostics') {
       runDiagnostics();
+    }
+
+    // Launch URL Search Wizard for newly added packs
+    if (allProcessed.length > 0) {
+      const queue = [];
+      const seenKeys = new Set();
+      for (const addon of allProcessed) {
+        const key = addon.groupId || addon.uuid;
+        if (!seenKeys.has(key)) {
+          seenKeys.add(key);
+          queue.push(addon);
+        }
+      }
+      if (queue.length > 0) {
+        startUrlWizard(queue);
+      }
+    }
+  };
+
+  // URL Finder Wizard Methods
+  const startUrlWizard = (queue, startIndex = 0) => {
+    if (!queue || queue.length === 0) return;
+    setUrlWizardQueue(queue);
+    setUrlWizardIndex(startIndex);
+    setUrlWizardResults([]);
+    setUrlWizardCustomUrl('');
+    setUrlWizardError(null);
+    setUrlWizardSuccess(null);
+    setUrlWizardOpen(true);
+
+    const currentItem = queue[startIndex];
+    if (currentItem) {
+      const rawTitle = (currentItem.displayName && currentItem.displayName !== 'pack.name')
+        ? currentItem.displayName
+        : (currentItem.name && currentItem.name !== 'pack.name'
+            ? currentItem.name
+            : (currentItem.originalFilename || ''));
+      const q = rawTitle
+        .replace(/\.(mcaddon|mcpack|zip)$/i, '')
+        .replace(/[\s\-_]*(addon|\(addon\)|pack|\(pack\)|behavior|resource|bp|rp)$/i, '')
+        .trim();
+      setUrlWizardQuery(q);
+      fetchUrlSearchResults(q, currentItem.uuid);
+    }
+  };
+
+  const fetchUrlSearchResults = async (query, uuid) => {
+    if (!query || !query.trim()) return;
+    setUrlWizardSearching(true);
+    setUrlWizardError(null);
+    try {
+      const res = await api.Addons.searchUrl(query.trim(), uuid);
+      setUrlWizardResults(res.results || []);
+      if (!res.results || res.results.length === 0) {
+        setUrlWizardError('No matching web pages found. You can try a different search term or paste a custom URL.');
+      }
+    } catch (err) {
+      console.warn('URL search failed:', err);
+      setUrlWizardError('Failed to search online. You can enter a custom URL below or skip.');
+      setUrlWizardResults([]);
+    } finally {
+      setUrlWizardSearching(false);
+    }
+  };
+
+  const handleAssignUrl = async (urlToAssign) => {
+    const currentItem = urlWizardQueue[urlWizardIndex];
+    if (!currentItem || !urlToAssign) return;
+
+    setUrlWizardSaving(true);
+    setUrlWizardError(null);
+    try {
+      await api.Addons.updateMetadata(currentItem.uuid, {
+        download_url: urlToAssign,
+        syncGroup: true
+      });
+      if (editModalAddon && editModalAddon.uuid === currentItem.uuid) {
+        setEditForm((prev) => ({ ...prev, downloadUrl: urlToAssign }));
+      }
+      setUrlWizardSuccess(`Linked URL to "${currentItem.displayName || currentItem.name}"!`);
+      await loadData();
+
+      // Advance to next pack or close
+      setTimeout(() => {
+        handleWizardNext();
+      }, 600);
+    } catch (err) {
+      setUrlWizardError(`Failed to save URL: ${err.message || 'Unknown error'}`);
+    } finally {
+      setUrlWizardSaving(false);
+    }
+  };
+
+  const handleWizardNext = () => {
+    setUrlWizardSuccess(null);
+    setUrlWizardError(null);
+    setUrlWizardCustomUrl('');
+    const nextIdx = urlWizardIndex + 1;
+    if (nextIdx < urlWizardQueue.length) {
+      setUrlWizardIndex(nextIdx);
+      const nextItem = urlWizardQueue[nextIdx];
+      const rawTitle = (nextItem.displayName && nextItem.displayName !== 'pack.name')
+        ? nextItem.displayName
+        : (nextItem.name && nextItem.name !== 'pack.name'
+            ? nextItem.name
+            : (nextItem.originalFilename || ''));
+      const q = rawTitle
+        .replace(/\.(mcaddon|mcpack|zip)$/i, '')
+        .replace(/[\s\-_]*(addon|\(addon\)|pack|\(pack\)|behavior|resource|bp|rp)$/i, '')
+        .trim();
+      setUrlWizardQuery(q);
+      fetchUrlSearchResults(q, nextItem.uuid);
+    } else {
+      setUrlWizardOpen(false);
+      setUrlWizardQueue([]);
+    }
+  };
+
+  const handleWizardSkipPack = () => {
+    handleWizardNext();
+  };
+
+  const handleWizardSkipAll = () => {
+    setUrlWizardOpen(false);
+    setUrlWizardQueue([]);
+    setUrlWizardResults([]);
+  };
+
+  const handleWizardAutoSearchAll = async () => {
+    setUrlWizardAutoSearchingAll(true);
+    setUrlWizardError(null);
+    try {
+      for (let i = urlWizardIndex; i < urlWizardQueue.length; i++) {
+        const item = urlWizardQueue[i];
+        const rawTitle = (item.displayName && item.displayName !== 'pack.name')
+          ? item.displayName
+          : (item.name && item.name !== 'pack.name'
+              ? item.name
+              : (item.originalFilename || ''));
+        const q = rawTitle
+          .replace(/\.(mcaddon|mcpack|zip)$/i, '')
+          .replace(/[\s\-_]*(addon|\(addon\)|pack|\(pack\)|behavior|resource|bp|rp)$/i, '')
+          .trim();
+        try {
+          const res = await api.Addons.searchUrl(q, item.uuid);
+          if (res.results && res.results.length > 0 && res.results[0].url) {
+            await api.Addons.updateMetadata(item.uuid, {
+              download_url: res.results[0].url,
+              syncGroup: true
+            });
+          }
+        } catch (_) {}
+      }
+      await loadData();
+      setUrlWizardOpen(false);
+      setUrlWizardQueue([]);
+      setSuccessMsg('Auto-assigned top search URLs to all uploaded addon packages!');
+    } catch (err) {
+      setUrlWizardError(`Auto-search failed: ${err.message}`);
+    } finally {
+      setUrlWizardAutoSearchingAll(false);
     }
   };
 
@@ -1382,6 +1560,9 @@ export const Addons = () => {
                     const isSystem = systemUuidsSet.has(pack.uuid);
                     const dbAddon = addonsList.find((a) => a.uuid === pack.uuid);
                     const cleanTitle = dbAddon ? getCleanPackName(dbAddon) : (pack.name && pack.name !== 'pack.name' ? pack.name : 'Bedrock Pack');
+                    const companion = dbAddon?.group_id ? addonsList.find(a => a.group_id === dbAddon.group_id && a.uuid !== dbAddon.uuid) : null;
+                    const hasIcon = Boolean(dbAddon?.hasIcon || companion?.hasIcon);
+                    const iconUuid = (dbAddon?.hasIcon && dbAddon.uuid) || (companion?.hasIcon && companion.uuid) || pack.uuid;
 
                     return (
                       <div
@@ -1397,6 +1578,29 @@ export const Addons = () => {
                           ⋮⋮
                         </div>
                         <div className="pack-order-badge">#{idx + 1}</div>
+
+                        {/* Pack Logo / Icon */}
+                        <div className="pack-item-icon-wrap" title={cleanTitle}>
+                          {hasIcon ? (
+                            <img
+                              src={`/api/addons/${iconUuid}/icon`}
+                              alt=""
+                              className="pack-item-icon-img"
+                              onError={(e) => {
+                                e.target.style.display = 'none';
+                                const fallback = e.target.parentElement.querySelector('.pack-item-icon-fallback');
+                                if (fallback) fallback.style.display = 'flex';
+                              }}
+                            />
+                          ) : null}
+                          <span
+                            className="pack-item-icon-fallback"
+                            style={{ display: hasIcon ? 'none' : 'flex' }}
+                          >
+                            ⚙️
+                          </span>
+                        </div>
+
                         <div className="pack-info flex-1 min-w-0">
                           <div className="d-flex items-center gap-2">
                             <span className="pack-item-name font-bold text-white truncate">{cleanTitle}</span>
@@ -1457,27 +1661,49 @@ export const Addons = () => {
                   <p className="text-muted text-xs italic m-0">All installed behavior packs are active.</p>
                 ) : (
                   <div className="d-flex flex-wrap gap-2">
-                    {inactiveBP.map((pack) => (
-                      <button
-                        key={pack.uuid}
-                        type="button"
-                        className="available-chip"
-                        onClick={() => {
-                          const v = typeof pack.version === 'string'
-                            ? pack.version.split('.').map((n) => parseInt(n, 10) || 0)
-                            : (Array.isArray(pack.version) ? pack.version : [1, 0, 0]);
-                          setActiveBP([...activeBP, { uuid: pack.uuid, version: v, name: getCleanPackName(pack) }]);
-                        }}
-                        title={`Click to add ${getCleanPackName(pack)} to active list`}
-                      >
-                        <span>{getCleanPackName(pack)}</span>
-                        <span className="chip-plus">+</span>
-                      </button>
-                    ))}
+                    {inactiveBP.map((pack) => {
+                      const packDb = addonsList.find(a => a.uuid === pack.uuid) || pack;
+                      const comp = packDb.group_id ? addonsList.find(a => a.group_id === packDb.group_id && a.uuid !== packDb.uuid) : null;
+                      const chipIconUuid = (packDb.hasIcon && packDb.uuid) || (comp?.hasIcon && comp.uuid) || pack.uuid;
+                      const hasChipIcon = Boolean(packDb.hasIcon || comp?.hasIcon);
+                      return (
+                        <button
+                          key={pack.uuid}
+                          type="button"
+                          className="available-chip"
+                          onClick={() => {
+                            const v = typeof pack.version === 'string'
+                              ? pack.version.split('.').map((n) => parseInt(n, 10) || 0)
+                              : (Array.isArray(pack.version) ? pack.version : [1, 0, 0]);
+                            setActiveBP([...activeBP, { uuid: pack.uuid, version: v, name: getCleanPackName(pack) }]);
+                          }}
+                          title={`Click to add ${getCleanPackName(pack)} to active list`}
+                        >
+                          <div className="available-chip-icon-wrap">
+                            {hasChipIcon ? (
+                              <img
+                                src={`/api/addons/${chipIconUuid}/icon`}
+                                alt=""
+                                className="available-chip-icon-img"
+                                onError={(e) => {
+                                  e.target.style.display = 'none';
+                                  const fallback = e.target.parentElement.querySelector('.available-chip-icon-fallback');
+                                  if (fallback) fallback.style.display = 'inline';
+                                }}
+                              />
+                            ) : null}
+                            <span className="available-chip-icon-fallback" style={{ display: hasChipIcon ? 'none' : 'inline' }}>⚙️</span>
+                          </div>
+                          <span>{getCleanPackName(pack)}</span>
+                          <span className="chip-plus">+</span>
+                        </button>
+                      );
+                    })}
                   </div>
                 )}
               </div>
             </div>
+
 
             {/* COLUMN 2: ACTIVE RESOURCE PACKS */}
             <div className="pack-order-column modern-card p-4">
@@ -1503,6 +1729,9 @@ export const Addons = () => {
                     const isSystem = systemUuidsSet.has(pack.uuid);
                     const dbAddon = addonsList.find((a) => a.uuid === pack.uuid);
                     const cleanTitle = dbAddon ? getCleanPackName(dbAddon) : (pack.name && pack.name !== 'pack.name' ? pack.name : 'Bedrock Pack');
+                    const companion = dbAddon?.group_id ? addonsList.find(a => a.group_id === dbAddon.group_id && a.uuid !== dbAddon.uuid) : null;
+                    const hasIcon = Boolean(dbAddon?.hasIcon || companion?.hasIcon);
+                    const iconUuid = (dbAddon?.hasIcon && dbAddon.uuid) || (companion?.hasIcon && companion.uuid) || pack.uuid;
 
                     return (
                       <div
@@ -1518,6 +1747,29 @@ export const Addons = () => {
                           ⋮⋮
                         </div>
                         <div className="pack-order-badge rp-badge">#{idx + 1}</div>
+
+                        {/* Pack Logo / Icon */}
+                        <div className="pack-item-icon-wrap" title={cleanTitle}>
+                          {hasIcon ? (
+                            <img
+                              src={`/api/addons/${iconUuid}/icon`}
+                              alt=""
+                              className="pack-item-icon-img"
+                              onError={(e) => {
+                                e.target.style.display = 'none';
+                                const fallback = e.target.parentElement.querySelector('.pack-item-icon-fallback');
+                                if (fallback) fallback.style.display = 'flex';
+                              }}
+                            />
+                          ) : null}
+                          <span
+                            className="pack-item-icon-fallback"
+                            style={{ display: hasIcon ? 'none' : 'flex' }}
+                          >
+                            🎨
+                          </span>
+                        </div>
+
                         <div className="pack-info flex-1 min-w-0">
                           <div className="d-flex items-center gap-2">
                             <span className="pack-item-name font-bold text-white truncate">{cleanTitle}</span>
@@ -1578,23 +1830,44 @@ export const Addons = () => {
                   <p className="text-muted text-xs italic m-0">All installed resource packs are active.</p>
                 ) : (
                   <div className="d-flex flex-wrap gap-2">
-                    {inactiveRP.map((pack) => (
-                      <button
-                        key={pack.uuid}
-                        type="button"
-                        className="available-chip"
-                        onClick={() => {
-                          const v = typeof pack.version === 'string'
-                            ? pack.version.split('.').map((n) => parseInt(n, 10) || 0)
-                            : (Array.isArray(pack.version) ? pack.version : [1, 0, 0]);
-                          setActiveRP([...activeRP, { uuid: pack.uuid, version: v, name: getCleanPackName(pack) }]);
-                        }}
-                        title={`Click to add ${getCleanPackName(pack)} to active list`}
-                      >
-                        <span>{getCleanPackName(pack)}</span>
-                        <span className="chip-plus">+</span>
-                      </button>
-                    ))}
+                    {inactiveRP.map((pack) => {
+                      const packDb = addonsList.find(a => a.uuid === pack.uuid) || pack;
+                      const comp = packDb.group_id ? addonsList.find(a => a.group_id === packDb.group_id && a.uuid !== packDb.uuid) : null;
+                      const chipIconUuid = (packDb.hasIcon && packDb.uuid) || (comp?.hasIcon && comp.uuid) || pack.uuid;
+                      const hasChipIcon = Boolean(packDb.hasIcon || comp?.hasIcon);
+                      return (
+                        <button
+                          key={pack.uuid}
+                          type="button"
+                          className="available-chip"
+                          onClick={() => {
+                            const v = typeof pack.version === 'string'
+                              ? pack.version.split('.').map((n) => parseInt(n, 10) || 0)
+                              : (Array.isArray(pack.version) ? pack.version : [1, 0, 0]);
+                            setActiveRP([...activeRP, { uuid: pack.uuid, version: v, name: getCleanPackName(pack) }]);
+                          }}
+                          title={`Click to add ${getCleanPackName(pack)} to active list`}
+                        >
+                          <div className="available-chip-icon-wrap">
+                            {hasChipIcon ? (
+                              <img
+                                src={`/api/addons/${chipIconUuid}/icon`}
+                                alt=""
+                                className="available-chip-icon-img"
+                                onError={(e) => {
+                                  e.target.style.display = 'none';
+                                  const fallback = e.target.parentElement.querySelector('.available-chip-icon-fallback');
+                                  if (fallback) fallback.style.display = 'inline';
+                                }}
+                              />
+                            ) : null}
+                            <span className="available-chip-icon-fallback" style={{ display: hasChipIcon ? 'none' : 'inline' }}>🎨</span>
+                          </div>
+                          <span>{getCleanPackName(pack)}</span>
+                          <span className="chip-plus">+</span>
+                        </button>
+                      );
+                    })}
                   </div>
                 )}
               </div>
@@ -1862,7 +2135,19 @@ export const Addons = () => {
                 </div>
 
                 <div className="form-group-modern mb-4">
-                  <label className="field-label-bold">External Download / Source URL (Optional):</label>
+                  <div className="d-flex justify-between items-center mb-1">
+                    <label className="field-label-bold m-0">External Download / Source URL (Optional):</label>
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-xs d-flex items-center gap-1"
+                      onClick={() => {
+                        startUrlWizard([editModalAddon]);
+                      }}
+                      title="Search web for official addon download or info page"
+                    >
+                      <span>🔍 Auto Search Online</span>
+                    </button>
+                  </div>
                   <input
                     type="url"
                     className="input-modern"
@@ -2232,8 +2517,295 @@ export const Addons = () => {
           </div>
         </div>
       )}
+
+      {/* =========================================================================
+          MODAL: ADDON SOURCE URL FINDER & METADATA WIZARD
+          ========================================================================= */}
+      {urlWizardOpen && urlWizardQueue.length > 0 && (
+        <div className="modal-overlay" onClick={() => !urlWizardSaving && !urlWizardAutoSearchingAll && handleWizardSkipAll()}>
+          <div className="modal url-wizard-modal" onClick={(e) => e.stopPropagation()} role="dialog" style={{ maxWidth: '680px', width: '92%' }}>
+            <div className="modal-header d-flex justify-between items-center">
+              <div className="d-flex items-center gap-2">
+                <span className="text-xl">🌐</span>
+                <div>
+                  <h3 className="modal-title m-0">Addon Source URL &amp; Metadata Finder</h3>
+                  <span className="text-xs text-sub">
+                    {urlWizardQueue.length > 1
+                      ? `Pack ${urlWizardIndex + 1} of ${urlWizardQueue.length}`
+                      : 'Link official addon download or information page'}
+                  </span>
+                </div>
+              </div>
+              <button
+                type="button"
+                className="modal-close-btn"
+                onClick={handleWizardSkipAll}
+                disabled={urlWizardSaving || urlWizardAutoSearchingAll}
+                title="Skip All and close"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="modal-body p-4">
+              {/* Current Pack Banner */}
+              {(() => {
+                const currentPack = urlWizardQueue[urlWizardIndex];
+                if (!currentPack) return null;
+                const comp = currentPack.groupId
+                  ? addonsList.find((a) => a.group_id === currentPack.groupId && a.uuid !== currentPack.uuid)
+                  : null;
+                const hasIco = Boolean(currentPack.hasIcon || comp?.hasIcon);
+                const icoUuid = (currentPack.hasIcon && currentPack.uuid) || (comp?.hasIcon && comp.uuid) || currentPack.uuid;
+                const packTitle = currentPack.displayName || currentPack.name || 'Bedrock Addon';
+
+                return (
+                  <div className="wizard-pack-banner mb-4 p-3 rounded d-flex items-center justify-between gap-3">
+                    <div className="d-flex items-center gap-3 min-w-0">
+                      <div className="wizard-pack-icon-wrap flex-shrink-0">
+                        {hasIco ? (
+                          <img
+                            src={`/api/addons/${icoUuid}/icon`}
+                            alt=""
+                            className="wizard-pack-icon-img"
+                            onError={(e) => {
+                              e.target.style.display = 'none';
+                              const fallback = e.target.parentElement.querySelector('.wizard-pack-icon-fallback');
+                              if (fallback) fallback.style.display = 'flex';
+                            }}
+                          />
+                        ) : null}
+                        <div
+                          className="wizard-pack-icon-fallback"
+                          style={{ display: hasIco ? 'none' : 'flex' }}
+                        >
+                          🧩
+                        </div>
+                      </div>
+                      <div className="min-w-0">
+                        <h4 className="m-0 font-bold text-white text-base truncate">{packTitle}</h4>
+                        <div className="text-xs text-muted font-mono mt-0.5">
+                          v{currentPack.version || '1.0.0'} • {currentPack.type === 'resource' ? 'Resource Pack' : 'Behavior Pack'}
+                          {comp && ' • Paired Dual-Pack'}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Actions for multiple uploads */}
+                    <div className="d-flex items-center gap-1 flex-shrink-0">
+                      {urlWizardQueue.length > 1 && (
+                        <button
+                          type="button"
+                          className="btn btn-primary btn-xs"
+                          onClick={handleWizardAutoSearchAll}
+                          disabled={urlWizardAutoSearchingAll || urlWizardSearching || urlWizardSaving}
+                          title="Auto-search and assign the best URL match for all uploaded packs in queue"
+                        >
+                          {urlWizardAutoSearchingAll ? '⚡ Auto-Linking...' : '⚡ Auto Search All'}
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-xs"
+                        onClick={handleWizardSkipPack}
+                        disabled={urlWizardAutoSearchingAll || urlWizardSaving}
+                        title="Skip this pack and move to next"
+                      >
+                        {urlWizardIndex < urlWizardQueue.length - 1 ? 'Skip Pack ⏭️' : 'Skip'}
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-xs text-muted"
+                        onClick={handleWizardSkipAll}
+                        disabled={urlWizardAutoSearchingAll || urlWizardSaving}
+                        title="Skip all remaining packs in queue"
+                      >
+                        Skip All ✕
+                      </button>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* Search Query Bar */}
+              <div className="wizard-search-bar mb-3 d-flex gap-2">
+                <input
+                  type="text"
+                  className="input-modern flex-1"
+                  placeholder="Search addon name, creator, or keywords..."
+                  value={urlWizardQuery}
+                  onChange={(e) => setUrlWizardQuery(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      fetchUrlSearchResults(urlWizardQuery, urlWizardQueue[urlWizardIndex]?.uuid);
+                    }
+                  }}
+                  disabled={urlWizardSearching || urlWizardSaving || urlWizardAutoSearchingAll}
+                />
+                <button
+                  type="button"
+                  className="btn btn-secondary px-3"
+                  onClick={() => fetchUrlSearchResults(urlWizardQuery, urlWizardQueue[urlWizardIndex]?.uuid)}
+                  disabled={urlWizardSearching || urlWizardSaving || urlWizardAutoSearchingAll || !urlWizardQuery.trim()}
+                >
+                  {urlWizardSearching ? 'Searching...' : '🔍 Search Web'}
+                </button>
+              </div>
+
+              {/* Status / Alert Toasts */}
+              {urlWizardError && (
+                <div className="alert-toast alert-warning mb-3 py-2 px-3 text-xs">
+                  <span>⚠️ {urlWizardError}</span>
+                </div>
+              )}
+              {urlWizardSuccess && (
+                <div className="alert-toast alert-success mb-3 py-2 px-3 text-xs">
+                  <span>✓ {urlWizardSuccess}</span>
+                </div>
+              )}
+
+              {/* Results List */}
+              <div className="wizard-results-container mb-4">
+                <div className="d-flex justify-between items-center mb-2">
+                  <span className="text-xs font-bold text-sub text-uppercase tracking-wider">
+                    Found Web Options ({urlWizardResults.length}):
+                  </span>
+                  {urlWizardResults.length > 0 && (
+                    <span className="text-xs text-muted">Click "Select" to link pack to URL</span>
+                  )}
+                </div>
+
+                {urlWizardSearching ? (
+                  <div className="py-8 text-center border-dashed rounded">
+                    <div className="spinner mb-2" />
+                    <p className="text-sub text-sm m-0">
+                      Searching CurseForge, MCPEDL, Chunk, PlanetMinecraft, and the web...
+                    </p>
+                  </div>
+                ) : urlWizardResults.length === 0 ? (
+                  <div className="py-6 text-center border-dashed rounded text-muted text-sm">
+                    No web results loaded yet. Click <strong>"Search Web"</strong> or enter a custom URL below.
+                  </div>
+                ) : (
+                  <div className="wizard-results-list d-flex flex-column gap-2" style={{ maxHeight: '280px', overflowY: 'auto' }}>
+                    {urlWizardResults.map((item, idx) => (
+                      <div key={item.url || idx} className="wizard-result-card p-3 rounded d-flex items-start gap-3">
+                        <div className="wizard-result-thumb-wrap flex-shrink-0">
+                          {item.image ? (
+                            <img
+                              src={item.image}
+                              alt=""
+                              className="wizard-result-thumb-img"
+                              onError={(e) => {
+                                e.target.style.display = 'none';
+                                const fallback = e.target.parentElement.querySelector('.wizard-result-thumb-fallback');
+                                if (fallback) fallback.style.display = 'flex';
+                              }}
+                            />
+                          ) : null}
+                          <div
+                            className="wizard-result-thumb-fallback"
+                            style={{ display: item.image ? 'none' : 'flex' }}
+                          >
+                            🌐
+                          </div>
+                        </div>
+
+                        <div className="flex-1 min-w-0">
+                          <div className="d-flex items-center gap-2 mb-0.5">
+                            {item.siteName && (
+                              <span className="badge badge-system text-xs py-0 px-1 font-mono">
+                                {item.siteName}
+                              </span>
+                            )}
+                            <a
+                              href={item.url}
+                              target="_blank"
+                              rel="noreferrer noopener"
+                              className="wizard-result-link font-semibold text-white text-sm truncate flex-1 hover:underline"
+                              title={item.title}
+                            >
+                              {item.title} ↗
+                            </a>
+                          </div>
+                          <p className="wizard-result-snippet text-xs text-muted m-0">
+                            {item.snippet}
+                          </p>
+                          <span className="text-xs text-sub font-mono truncate d-block mt-0.5" style={{ opacity: 0.7 }}>
+                            {item.url}
+                          </span>
+                        </div>
+
+                        <button
+                          type="button"
+                          className="btn btn-primary btn-sm flex-shrink-0"
+                          onClick={() => handleAssignUrl(item.url)}
+                          disabled={urlWizardSaving || urlWizardAutoSearchingAll}
+                        >
+                          Select ✓
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Custom URL Input Section */}
+              <div className="wizard-custom-url-box p-3 rounded border">
+                <label className="text-xs font-bold text-white mb-1.5 d-block">
+                  Or Input Custom URL Manually:
+                </label>
+                <div className="d-flex gap-2">
+                  <input
+                    type="url"
+                    className="input-modern flex-1 text-sm"
+                    placeholder="https://www.curseforge.com/... or https://mcpedl.com/..."
+                    value={urlWizardCustomUrl}
+                    onChange={(e) => setUrlWizardCustomUrl(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        if (urlWizardCustomUrl.trim()) handleAssignUrl(urlWizardCustomUrl.trim());
+                      }
+                    }}
+                    disabled={urlWizardSaving || urlWizardAutoSearchingAll}
+                  />
+                  <button
+                    type="button"
+                    className="btn btn-secondary text-sm px-3"
+                    onClick={() => handleAssignUrl(urlWizardCustomUrl.trim())}
+                    disabled={!urlWizardCustomUrl.trim() || urlWizardSaving || urlWizardAutoSearchingAll}
+                  >
+                    Save URL
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div className="modal-footer d-flex justify-between items-center">
+              <span className="text-xs text-muted">
+                {urlWizardQueue.length > 1
+                  ? `${urlWizardQueue.length - urlWizardIndex} pack(s) remaining in queue`
+                  : 'Changes automatically sync to paired companion pack'}
+              </span>
+              <div className="d-flex gap-2">
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={handleWizardSkipPack}
+                  disabled={urlWizardSaving || urlWizardAutoSearchingAll}
+                >
+                  {urlWizardIndex < urlWizardQueue.length - 1 ? 'Skip This Pack' : 'Close'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
+
 
 export default Addons;

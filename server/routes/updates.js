@@ -71,7 +71,7 @@ router.post('/apply', requireAdmin, async (req, res) => {
     return res.json(result);
   } catch (err) {
     console.error('[UpdatesRoute] Error applying update:', err);
-    return res.status(500).json({ error: 'Failed to apply update', details: err.message });
+    return res.status(500).json({ error: err.message || 'Failed to apply update', details: err.message });
   }
 });
 

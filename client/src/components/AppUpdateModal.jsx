@@ -68,7 +68,7 @@ export const AppUpdateModal = ({ updateInfo, onClose, onUpdateSuccess }) => {
     } catch (err) {
       console.error('Failed to apply update:', err);
       stopProgressPolling();
-      setError(err.message || 'Failed to apply update.');
+      setError(err.data?.details || err.message || 'Failed to apply update.');
       setUpdating(false);
     }
   };

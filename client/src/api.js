@@ -54,6 +54,7 @@ export const request = async (method, url, body = null, isFormData = false, extr
 
   if (!response.ok) {
     const errorMsg =
+      (data && data.details) ||
       (data && data.message) ||
       (data && data.error) ||
       (typeof data === 'string' ? data : 'API Request Failed');

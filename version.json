@@ -1,6 +1,6 @@
 {
-  "commit": "f8d1fcb",
-  "commitFull": "f8d1fcb0b460a13bb3fd99bff0d17c6dfac546d7",
-  "date": "11 seconds ago",
-  "subject": "v1.2.1: Full stability pass, Xbox bot 1-click device link overhaul, cross-platform clipboard fix, and process kill management"
+  "commit": "788b374",
+  "commitFull": "788b37477546f6a0bc5ce414895333ae74878af2",
+  "date": "14 minutes ago",
+  "subject": "chore: sync version.json with commit f8d1fcb"
 }

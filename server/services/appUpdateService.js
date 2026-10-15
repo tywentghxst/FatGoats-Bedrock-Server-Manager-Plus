@@ -68,6 +68,69 @@ function execGit(cmd, options = {}) {
   }).trim();
 }
 
+/**
+ * Handle Windows file locks on running executables (e.g. BedrockServerManager.exe).
+ * On NTFS, a running executable cannot be overwritten or deleted, but it CAN be renamed.
+ * Renaming the locked file allows the new file to be created in its original path.
+ */
+function prepareLockedFileForReplacement(filePath) {
+  if (!fs.existsSync(filePath)) return true;
+  try {
+    const fd = fs.openSync(filePath, 'r+');
+    fs.closeSync(fd);
+    return true; // Not locked
+  } catch (err) {
+    if (err.code === 'EBUSY' || err.code === 'EPERM') {
+      const backupPath = `${filePath}.old`;
+      try {
+        if (fs.existsSync(backupPath)) {
+          try {
+            fs.unlinkSync(backupPath);
+          } catch (_) {
+            fs.renameSync(backupPath, `${filePath}.old-${Date.now()}`);
+          }
+        }
+        fs.renameSync(filePath, backupPath);
+        console.log(`[AppUpdateService] Renamed busy file ${path.basename(filePath)} -> ${path.basename(backupPath)} to allow replacement.`);
+        return true;
+      } catch (renameErr) {
+        console.warn(`[AppUpdateService] Could not rename busy file ${path.basename(filePath)}:`, renameErr.message);
+        return false;
+      }
+    }
+    return false;
+  }
+}
+
+function safeWriteFile(targetFilePath, buffer) {
+  try {
+    fs.writeFileSync(targetFilePath, buffer);
+  } catch (err) {
+    if (err.code === 'EBUSY' || err.code === 'EPERM') {
+      const backupPath = `${targetFilePath}.old`;
+      try {
+        if (fs.existsSync(backupPath)) {
+          try {
+            fs.unlinkSync(backupPath);
+          } catch (_) {
+            fs.renameSync(backupPath, `${targetFilePath}.old-${Date.now()}`);
+          }
+        }
+        fs.renameSync(targetFilePath, backupPath);
+        fs.writeFileSync(targetFilePath, buffer);
+        console.log(`[AppUpdateService] Renamed busy file and wrote new: ${path.basename(targetFilePath)}`);
+      } catch (retryErr) {
+        console.warn(`[AppUpdateService] Could not write busy file ${path.basename(targetFilePath)}, saving to .new:`, retryErr.message);
+        try {
+          fs.writeFileSync(`${targetFilePath}.new`, buffer);
+        } catch (_) {}
+      }
+    } else {
+      throw err;
+    }
+  }
+}
+
 function getSetting(key, defaultValue = null) {
   try {
     const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(key);
@@ -417,6 +480,10 @@ class AppUpdateService {
       this.updateStage = 2;
       this.updateProgress = 'Pulling latest code changes from GitHub (main)...';
 
+      // Unlock running Windows binaries out of the way so Git or Zip can write new ones cleanly
+      prepareLockedFileForReplacement(path.join(ROOT_DIR, 'BedrockServerManager.exe'));
+      prepareLockedFileForReplacement(path.join(ROOT_DIR, 'BedrockServerManager-Setup.exe'));
+
       if (hasGitRepo() && hasGit()) {
         try {
           console.log('[AppUpdateService] Attempting Git pull from origin...');
@@ -504,7 +571,7 @@ class AppUpdateService {
           }
 
           const buffer = await entry.buffer();
-          fs.writeFileSync(targetFilePath, buffer);
+          safeWriteFile(targetFilePath, buffer);
         }
 
         try {
@@ -532,9 +599,14 @@ class AppUpdateService {
       this.updatePercent = 60;
       this.updateStage = 3;
       this.updateProgress = 'Verifying and updating application dependencies...';
+      const execEnv = {
+        ...process.env,
+        PATH: `${path.join(ROOT_DIR, 'nodejs')};${process.env.PATH || ''}`,
+      };
       try {
         execSync('cmd /c "npm install --no-audit --no-fund"', {
           cwd: ROOT_DIR,
+          env: execEnv,
           windowsHide: true,
           timeout: 60000,
         });
@@ -551,6 +623,7 @@ class AppUpdateService {
       try {
         execSync('cmd /c "cd client && npm run build"', {
           cwd: ROOT_DIR,
+          env: execEnv,
           windowsHide: true,
           timeout: 60000,
         });
@@ -568,6 +641,7 @@ class AppUpdateService {
       const cscPath = 'C:\\Windows\\Microsoft.NET\\Framework64\\v4.0.30319\\csc.exe';
       if (fs.existsSync(cscPath) && fs.existsSync(path.join(ROOT_DIR, 'tray', 'Program.cs'))) {
         try {
+          prepareLockedFileForReplacement(path.join(ROOT_DIR, 'BedrockServerManager.exe'));
           execSync(
             `"${cscPath}" /target:winexe /out:BedrockServerManager.exe /win32icon:tray\\app.ico /r:System.dll,System.Drawing.dll,System.Windows.Forms.dll,System.Core.dll tray\\Program.cs`,
             {

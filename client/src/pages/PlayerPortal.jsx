@@ -269,6 +269,7 @@ export const PlayerPortal = () => {
                       { id: 'server_status', enabled: true },
                       { id: 'direct_ip', enabled: true },
                       { id: 'xbox_bot', enabled: true },
+                      { id: 'installed_addons', enabled: true },
                     ];
 
                 const renderSection = (id) => {
@@ -582,6 +583,79 @@ export const PlayerPortal = () => {
                                   🔄 Restart Relay Bot
                                 </button>
                               </div>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  }
+
+                  if (id === 'installed_addons') {
+                    const addons = status?.addons || [];
+                    return (
+                      <div key="installed_addons" className="portal-section-block portal-addons-section mt-4">
+                        <div className="portal-tunnel-card portal-addons-card">
+                          <div className="portal-tunnel-header">
+                            <div className="d-flex items-center gap-2">
+                              <span className="portal-tunnel-logo">🧩</span>
+                              <div>
+                                <h3 className="portal-tunnel-title">Active Server Addons</h3>
+                                <p className="portal-tunnel-desc">
+                                  Installed and active custom addons for this world
+                                </p>
+                              </div>
+                            </div>
+                            <span className="portal-badge portal-badge-count">
+                              {addons.length} {addons.length === 1 ? 'Addon' : 'Addons'}
+                            </span>
+                          </div>
+
+                          {addons.length === 0 ? (
+                            <div className="portal-addons-empty">
+                              <span className="portal-empty-icon">📦</span>
+                              <p className="text-sub text-sm">No custom addons currently active on this world.</p>
+                            </div>
+                          ) : (
+                            <div className="portal-addons-grid">
+                              {addons.map((addon) => (
+                                <div key={addon.id} className="portal-addon-card">
+                                  <div className="portal-addon-icon-wrap">
+                                    {addon.hasIcon && addon.iconUuid ? (
+                                      <img
+                                        src={`/api/addons/${addon.iconUuid}/icon`}
+                                        alt={addon.name}
+                                        className="portal-addon-icon-img"
+                                        onError={(e) => {
+                                          e.target.style.display = 'none';
+                                          const fallback = e.target.parentElement.querySelector('.portal-addon-icon-fallback');
+                                          if (fallback) fallback.style.display = 'flex';
+                                        }}
+                                      />
+                                    ) : null}
+                                    <div
+                                      className="portal-addon-icon-fallback"
+                                      style={{ display: addon.hasIcon && addon.iconUuid ? 'none' : 'flex' }}
+                                    >
+                                      🧩
+                                    </div>
+                                  </div>
+                                  <div className="portal-addon-info">
+                                    <div className="portal-addon-header-line">
+                                      <h4 className="portal-addon-name" title={addon.name}>
+                                        {addon.name}
+                                      </h4>
+                                      {addon.version && (
+                                        <span className="portal-addon-version">v{addon.version}</span>
+                                      )}
+                                    </div>
+                                    {addon.description ? (
+                                      <p className="portal-addon-desc">{addon.description}</p>
+                                    ) : (
+                                      <p className="portal-addon-desc text-muted">No details provided</p>
+                                    )}
+                                  </div>
+                                </div>
+                              ))}
                             </div>
                           )}
                         </div>

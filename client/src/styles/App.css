@@ -6716,6 +6716,144 @@ html, body, #root {
   align-items: center;
 }
 
+/* Player Portal Installed Addons Tile */
+.portal-addons-section {
+  width: 100%;
+}
+
+.portal-addons-card {
+  background: rgba(139, 92, 246, 0.05) !important;
+  border: 1px solid rgba(139, 92, 246, 0.25) !important;
+  border-radius: var(--radius-lg, 14px);
+  padding: 1.25rem;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+}
+
+.portal-badge-count {
+  background: rgba(139, 92, 246, 0.18);
+  color: #c4b5fd;
+  border: 1px solid rgba(139, 92, 246, 0.35);
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+}
+
+.portal-addons-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem 1rem;
+  text-align: center;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: var(--radius-md, 10px);
+  border: 1px dashed rgba(255, 255, 255, 0.08);
+}
+
+.portal-empty-icon {
+  font-size: 2rem;
+  margin-bottom: 0.5rem;
+  opacity: 0.6;
+}
+
+.portal-addons-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 0.85rem;
+  margin-top: 0.25rem;
+}
+
+.portal-addon-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.85rem;
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: var(--radius-md, 10px);
+  padding: 0.85rem;
+  transition: transform 0.18s ease, border-color 0.18s ease, background 0.18s ease;
+}
+
+.portal-addon-card:hover {
+  background: rgba(255, 255, 255, 0.03);
+  border-color: rgba(139, 92, 246, 0.4);
+  transform: translateY(-1px);
+}
+
+.portal-addon-icon-wrap {
+  flex-shrink: 0;
+  width: 52px;
+  height: 52px;
+  border-radius: 10px;
+  overflow: hidden;
+  background: rgba(0, 0, 0, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.portal-addon-icon-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  image-rendering: -webkit-optimize-contrast;
+}
+
+.portal-addon-icon-fallback {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.5rem;
+}
+
+.portal-addon-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.portal-addon-header-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.25rem;
+}
+
+.portal-addon-name {
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: #f1f5f9;
+  margin: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.portal-addon-version {
+  font-size: 0.7rem;
+  color: #a78bfa;
+  background: rgba(139, 92, 246, 0.15);
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+  flex-shrink: 0;
+  font-weight: 500;
+}
+
+.portal-addon-desc {
+  font-size: 0.74rem;
+  color: var(--text-sub, #94a3b8);
+  margin: 0;
+  line-height: 1.35;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
 /* --------------------------------------------------------------------------
    Console & Public Access Channel Switcher Tabs
    -------------------------------------------------------------------------- */
@@ -7111,6 +7249,10 @@ html, body, #root {
   }
 
   .update-steps-stepper {
+    grid-template-columns: 1fr !important;
+  }
+
+  .portal-addons-grid {
     grid-template-columns: 1fr !important;
   }
 }

@@ -8,6 +8,7 @@ const { authenticate, requireAdmin } = require('../middleware/auth');
 const serverProcess = require('../services/serverProcess');
 const { logAudit } = require('../services/auditService');
 const broadcasterService = require('../services/broadcasterService');
+const addonService = require('../services/addonService');
 
 const router = express.Router();
 
@@ -45,6 +46,7 @@ function getEffectivePortalBranding() {
     { id: 'server_status', name: 'Server Status & Power Controls', enabled: true },
     { id: 'direct_ip', name: 'Direct Server IP Connection', enabled: true },
     { id: 'xbox_bot', name: 'Xbox Live Friend Relay Bot', enabled: true },
+    { id: 'installed_addons', name: 'Installed Addons', enabled: true },
   ];
   let sections = defaultSections;
   try {
@@ -52,7 +54,20 @@ function getEffectivePortalBranding() {
     if (rawSections) {
       const parsed = JSON.parse(rawSections);
       if (Array.isArray(parsed) && parsed.length > 0) {
-        sections = parsed;
+        const merged = parsed.map(s => {
+          const match = defaultSections.find(d => d.id === s.id);
+          return {
+            id: s.id,
+            name: s.name || (match ? match.name : s.id),
+            enabled: s.enabled !== false
+          };
+        });
+        defaultSections.forEach(d => {
+          if (!merged.some(m => m.id === d.id)) {
+            merged.push(d);
+          }
+        });
+        sections = merged;
       }
     }
   } catch (_) {}
@@ -77,6 +92,109 @@ function getEffectivePortalBranding() {
 
   return { enabled, requireLogin, showXboxBot, slug, title, logoUrl, logoSize, subtitle, sections };
 }
+
+/**
+ * Return cleaned and deduplicated list of enabled addons for the active server world.
+ * Consolidates companion BP + RP dual packs into a single card without BP/RP tags.
+ * Excludes internal system/vanilla packs.
+ */
+function getEnabledPortalAddons() {
+  try {
+    let worldName = 'Bedrock level';
+    const propsPath = path.join(config.BDS_DIR, 'server.properties');
+    if (fs.existsSync(propsPath)) {
+      const content = fs.readFileSync(propsPath, 'utf8');
+      const match = content.match(/^level-name\s*=\s*(.+)$/m);
+      if (match && match[1].trim()) {
+        worldName = match[1].trim();
+      }
+    }
+
+    const active = addonService.getActiveAddons(worldName);
+    const activePacks = [...(active.behaviorPacks || []), ...(active.resourcePacks || [])];
+    const activeUuids = [...new Set(activePacks.map(p => p.uuid).filter(Boolean))];
+
+    if (activeUuids.length === 0) {
+      return [];
+    }
+
+    const placeholders = activeUuids.map(() => '?').join(',');
+    const dbAddons = db.prepare(`SELECT uuid, name, display_name, description, version, type, group_id, original_filename, is_system FROM addons WHERE uuid IN (${placeholders})`).all(...activeUuids);
+
+    const consolidated = new Map();
+
+    for (const pack of dbAddons) {
+      if (pack.is_system === 1) continue;
+      const nameLower = (pack.name || '').toLowerCase();
+      const origLower = (pack.original_filename || '').toLowerCase();
+      if (
+        nameLower.startsWith('vanilla') || nameLower.startsWith('chemistry') || nameLower.startsWith('editor') ||
+        origLower.startsWith('vanilla') || origLower.startsWith('chemistry') || origLower.startsWith('editor') ||
+        origLower.includes('gametest')
+      ) {
+        continue;
+      }
+
+      let cleanTitle = (pack.display_name && pack.display_name !== 'pack.name')
+        ? pack.display_name
+        : (pack.name && pack.name !== 'pack.name' ? pack.name : '');
+
+      if (!cleanTitle && pack.original_filename) {
+        cleanTitle = pack.original_filename.replace(/\.(mcaddon|mcpack|zip)$/i, '');
+      }
+      if (!cleanTitle) cleanTitle = 'Unknown Addon';
+
+      // Clean minecraft formatting codes like §a, §e, §l, §r and pack tags
+      const rawDesc = pack.description || '';
+      const cleanDesc = rawDesc
+        .replace(/§[0-9a-fk-or]/gi, '')
+        .replace(/\s*(behavior\s*pack|resource\s*pack|\(bp\)|\(rp\)|\bbp\b|\brp\b)\.?/gi, '')
+        .trim();
+
+      // Deduplication key: prefer group_id, then normalized original_filename without extension, or normalized clean title
+      const normKey = pack.group_id
+        ? `group:${pack.group_id}`
+        : (pack.original_filename
+            ? `orig:${pack.original_filename.toLowerCase().replace(/\.(mcaddon|mcpack|zip)$/i, '').replace(/[\s\-_]*(behavior|resource|bp|rp)[\s\-_]*(pack)?$/i, '')}`
+            : `name:${cleanTitle.toLowerCase().replace(/[\s\-_]*(behavior|resource|bp|rp)[\s\-_]*(pack)?$/i, '')}`);
+
+      const iconPath = addonService.getPackIconPath(pack.uuid);
+      const hasIcon = Boolean(iconPath);
+
+      if (!consolidated.has(normKey)) {
+        consolidated.set(normKey, {
+          id: pack.uuid,
+          name: cleanTitle,
+          description: cleanDesc,
+          version: pack.version || '1.0.0',
+          hasIcon,
+          iconUuid: hasIcon ? pack.uuid : null
+        });
+      } else {
+        const existing = consolidated.get(normKey);
+        // If companion has an icon and existing doesn't, use it
+        if (!existing.hasIcon && hasIcon) {
+          existing.hasIcon = true;
+          existing.iconUuid = pack.uuid;
+        }
+        // If existing has no description and this one has, use it
+        if (!existing.description && cleanDesc) {
+          existing.description = cleanDesc;
+        }
+        // If cleanTitle is more descriptive or doesn't end abruptly
+        if (cleanTitle && cleanTitle.length > existing.name.length && !existing.name.includes(cleanTitle)) {
+          existing.name = cleanTitle;
+        }
+      }
+    }
+
+    return Array.from(consolidated.values());
+  } catch (err) {
+    console.warn('[PortalRoute] Error resolving enabled portal addons:', err.message);
+    return [];
+  }
+}
+
 
 /**
  * Optional user authentication for public/portal endpoints
@@ -195,7 +313,8 @@ router.get('/status', (req, res) => {
         } catch (_) {
           return null;
         }
-      })()
+      })(),
+      addons: getEnabledPortalAddons()
     });
   } catch (err) {
     console.error('[PortalRoute] Error fetching status:', err);

@@ -48,6 +48,7 @@ export const Settings = () => {
     { id: 'server_status', name: 'Server Status & Power Controls', description: 'Live online status, active players, and Start / Restart / Start All / Restart All buttons', enabled: true },
     { id: 'direct_ip', name: 'Direct Server IP Connection', description: 'Direct server IP & port, 1-click clipboard copy, and manual join steps for PC & mobile', enabled: true },
     { id: 'xbox_bot', name: 'Xbox Live Friend Relay Bot', description: 'Console & mobile quick-join relay bot card, Gamertag, auto-friend guide, and bot power buttons', enabled: true },
+    { id: 'installed_addons', name: 'Installed Addons', description: 'Show enabled server addons, icons, versions, and details for players', enabled: true },
   ];
 
   // Player Quick-Start Portal state

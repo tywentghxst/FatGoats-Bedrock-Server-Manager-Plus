@@ -1,6 +1,6 @@
 {
-  "commit": "efa55b4",
-  "commitFull": "efa55b4aa863589fc2e68f98a46f0f4306f708cb",
+  "commit": "47ef84d",
+  "commitFull": "47ef84d03f03ff0462e6b24cbfedf568247302a6",
   "date": "Just now",
-  "subject": "v1.2.3: Add automatic Java 17+ (Adoptium Temurin 21 LTS) dependency installation to Setup wizard"
+  "subject": "feat(addons): display pack logos in load orders and add automated web URL search wizard on upload"
 }

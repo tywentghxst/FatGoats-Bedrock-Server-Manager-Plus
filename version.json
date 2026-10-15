@@ -1,6 +1,6 @@
 {
-  "commit": "be58efc",
-  "commitFull": "be58efcfb8f0e80f9f94bd8ab43966b9ac7eb2fa",
+  "commit": "efa55b4",
+  "commitFull": "efa55b4aa863589fc2e68f98a46f0f4306f708cb",
   "date": "Just now",
-  "subject": "v1.2.2: Fix spawn java ENOENT in Xbox Live broadcaster with automated JRE/JDK discovery and PATH enrichment"
+  "subject": "v1.2.3: Add automatic Java 17+ (Adoptium Temurin 21 LTS) dependency installation to Setup wizard"
 }

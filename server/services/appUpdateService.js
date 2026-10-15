@@ -1,24 +1,60 @@
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 const { execSync } = require('child_process');
+const fetch = require('node-fetch');
+const unzipper = require('unzipper');
 const db = require('../database');
 
 const ROOT_DIR = path.resolve(__dirname, '..', '..');
+const GITHUB_REPO = 'tywentghxst/FatGoats-Bedrock-Server-Manager-Plus';
+const GITHUB_BRANCH = 'main';
+
+/**
+ * Locate any installed Git binaries on Windows or in system PATH.
+ */
+function getGitPaths() {
+  const candidates = [
+    path.join(process.env.LOCALAPPDATA || '', 'Programs', 'Git', 'cmd'),
+    path.join(process.env.USERPROFILE || '', 'AppData', 'Local', 'Programs', 'Git', 'cmd'),
+    'C:\\Program Files\\Git\\cmd',
+    'C:\\Program Files (x86)\\Git\\cmd',
+    path.join(process.env.LOCALAPPDATA || '', 'Programs', 'Git', 'bin'),
+    'C:\\Program Files\\Git\\bin',
+  ];
+
+  const foundDirs = candidates.filter((dir) => {
+    try {
+      return fs.existsSync(path.join(dir, 'git.exe'));
+    } catch (_) {
+      return false;
+    }
+  });
+
+  return foundDirs;
+}
 
 function getGitEnv() {
-  const gitDir = path.join(process.env.LOCALAPPDATA || 'C:\\Users\\Tysci\\AppData\\Local', 'Programs', 'Git', 'cmd');
-  const ghDir = path.join(
-    process.env.LOCALAPPDATA || 'C:\\Users\\Tysci\\AppData\\Local',
-    'Microsoft',
-    'WinGet',
-    'Packages',
-    'GitHub.cli_Microsoft.Winget.Source_8wekyb3d8bbwe',
-    'bin'
-  );
+  const foundDirs = getGitPaths();
+  const pathPrefix = foundDirs.join(';');
   return {
     ...process.env,
-    PATH: `${gitDir};${ghDir};${process.env.PATH || ''}`,
+    PATH: pathPrefix ? `${pathPrefix};${process.env.PATH || ''}` : process.env.PATH || '',
   };
+}
+
+function hasGit() {
+  try {
+    const env = getGitEnv();
+    execSync('git --version', { env, windowsHide: true, stdio: 'ignore' });
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+function hasGitRepo() {
+  return fs.existsSync(path.join(ROOT_DIR, '.git'));
 }
 
 function execGit(cmd, options = {}) {
@@ -53,6 +89,8 @@ class AppUpdateService {
   constructor() {
     this.isUpdating = false;
     this.updateProgress = null;
+    this.updatePercent = 0;
+    this.updateStage = 0;
   }
 
   getPreferences() {
@@ -88,79 +126,234 @@ class AppUpdateService {
     return this.getPreferences();
   }
 
-  async checkUpdates(forceFetch = false) {
-    const prefs = this.getPreferences();
-    let currentCommit = 'unknown';
-    let currentCommitFull = 'unknown';
-    let currentCommitDate = '';
-    let currentCommitSubject = '';
-
+  /**
+   * Determine the current local version from version.json, git HEAD, or SQLite DB.
+   */
+  getCurrentVersion() {
+    // 1. Try reading ROOT_DIR/version.json
     try {
-      currentCommit = execGit('git rev-parse --short HEAD');
-      currentCommitFull = execGit('git rev-parse HEAD');
-      currentCommitDate = execGit('git log -1 --format=%cd --date=relative');
-      currentCommitSubject = execGit('git log -1 --format=%s');
-    } catch (err) {
-      console.warn('[AppUpdateService] Failed to inspect local HEAD:', err.message);
-    }
-
-    let remoteCommit = currentCommit;
-    let remoteCommitFull = currentCommitFull;
-    let remoteCommitDate = currentCommitDate;
-    let remoteCommitSubject = currentCommitSubject;
-    let commitsBehind = 0;
-    const changelog = [];
-
-    if (forceFetch) {
-      try {
-        console.log('[AppUpdateService] Fetching latest refs from origin...');
-        execGit('git fetch origin main', { timeout: 25000 });
-        setSetting('app_update_last_checked', new Date().toISOString());
-        prefs.lastChecked = new Date().toISOString();
-      } catch (err) {
-        console.warn('[AppUpdateService] Git fetch failed:', err.message);
-      }
-    }
-
-    try {
-      remoteCommit = execGit('git rev-parse --short origin/main');
-      remoteCommitFull = execGit('git rev-parse origin/main');
-      remoteCommitDate = execGit('git log origin/main -1 --format=%cd --date=relative');
-      remoteCommitSubject = execGit('git log origin/main -1 --format=%s');
-
-      const countRaw = execGit('git rev-list HEAD..origin/main --count');
-      commitsBehind = parseInt(countRaw, 10) || 0;
-
-      if (commitsBehind > 0) {
-        const rawLog = execGit('git log HEAD..origin/main --format=%h|%an|%cr|%s -n 15');
-        if (rawLog) {
-          rawLog.split('\n').forEach((line) => {
-            const parts = line.split('|');
-            if (parts.length >= 4) {
-              changelog.push({
-                hash: parts[0],
-                author: parts[1],
-                date: parts[2],
-                subject: parts.slice(3).join('|'),
-              });
-            }
-          });
+      const vPath = path.join(ROOT_DIR, 'version.json');
+      if (fs.existsSync(vPath)) {
+        const data = JSON.parse(fs.readFileSync(vPath, 'utf8'));
+        if (data && data.commit) {
+          return {
+            commit: data.commit.slice(0, 7),
+            commitFull: data.commitFull || data.commit,
+            date: data.date || '',
+            subject: data.subject || '',
+          };
         }
       }
+    } catch (_) {}
+
+    // 2. Try git rev-parse HEAD if .git is available
+    if (hasGitRepo() && hasGit()) {
+      try {
+        const commit = execGit('git rev-parse --short HEAD');
+        const commitFull = execGit('git rev-parse HEAD');
+        const date = execGit('git log -1 --format=%cd --date=relative');
+        const subject = execGit('git log -1 --format=%s');
+        return { commit, commitFull, date, subject };
+      } catch (_) {}
+    }
+
+    // 3. Try reading from SQLite settings table
+    const dbCommit = getSetting('app_current_commit', null);
+    if (dbCommit) {
+      return {
+        commit: dbCommit.slice(0, 7),
+        commitFull: dbCommit,
+        date: getSetting('app_current_commit_date', ''),
+        subject: getSetting('app_current_commit_subject', ''),
+      };
+    }
+
+    return {
+      commit: 'unknown',
+      commitFull: 'unknown',
+      date: '',
+      subject: '',
+    };
+  }
+
+  /**
+   * Save version metadata to version.json and database settings.
+   */
+  saveCurrentVersion(commitInfo) {
+    try {
+      const vPath = path.join(ROOT_DIR, 'version.json');
+      fs.writeFileSync(vPath, JSON.stringify(commitInfo, null, 2), 'utf8');
     } catch (err) {
-      console.warn('[AppUpdateService] Failed to check remote rev-list:', err.message);
+      console.warn('[AppUpdateService] Failed to write version.json:', err.message);
+    }
+
+    if (commitInfo.commitFull || commitInfo.commit) {
+      setSetting('app_current_commit', commitInfo.commitFull || commitInfo.commit);
+      if (commitInfo.date) setSetting('app_current_commit_date', commitInfo.date);
+      if (commitInfo.subject) setSetting('app_current_commit_subject', commitInfo.subject);
+    }
+  }
+
+  /**
+   * Fetch latest commits directly from the GitHub REST API.
+   */
+  async fetchGitHubCommits() {
+    const url = `https://api.github.com/repos/${GITHUB_REPO}/commits?per_page=30&sha=${GITHUB_BRANCH}`;
+    const res = await fetch(url, {
+      headers: {
+        'User-Agent': 'BedrockServerManager-AppUpdate',
+        Accept: 'application/vnd.github.v3+json',
+      },
+      timeout: 12000,
+    });
+
+    if (!res.ok) {
+      throw new Error(`GitHub API HTTP ${res.status}: ${res.statusText}`);
+    }
+
+    const commits = await res.json();
+    if (!Array.isArray(commits) || commits.length === 0) {
+      throw new Error('Invalid response from GitHub commits API');
+    }
+
+    return commits;
+  }
+
+  /**
+   * Check for updates using GitHub REST API first, falling back to Git CLI.
+   */
+  async checkUpdates(forceFetch = false) {
+    const prefs = this.getPreferences();
+    const current = this.getCurrentVersion();
+
+    let remoteCommit = current.commit;
+    let remoteCommitFull = current.commitFull;
+    let remoteCommitDate = current.date;
+    let remoteCommitSubject = current.subject;
+    let commitsBehind = 0;
+    const changelog = [];
+    let gitHubApiSucceeded = false;
+
+    // METHOD 1: Direct GitHub REST API query (works without git.exe or .git directory)
+    try {
+      const commits = await this.fetchGitHubCommits();
+      if (commits && commits.length > 0) {
+        gitHubApiSucceeded = true;
+        const latest = commits[0];
+        remoteCommit = latest.sha.slice(0, 7);
+        remoteCommitFull = latest.sha;
+        remoteCommitDate = latest.commit?.author?.date
+          ? new Date(latest.commit.author.date).toLocaleString()
+          : '';
+        remoteCommitSubject = latest.commit?.message?.split('\n')[0] || '';
+
+        // Compare current commit with remote
+        const isExactMatch =
+          current.commitFull &&
+          current.commitFull !== 'unknown' &&
+          (latest.sha === current.commitFull || latest.sha.startsWith(current.commit));
+
+        if (isExactMatch) {
+          commitsBehind = 0;
+        } else {
+          // Look for local commit in the remote history list
+          const localIndex = commits.findIndex(
+            (c) =>
+              c.sha === current.commitFull ||
+              (current.commit !== 'unknown' && c.sha.startsWith(current.commit))
+          );
+
+          if (localIndex > 0) {
+            commitsBehind = localIndex;
+            for (let i = 0; i < Math.min(localIndex, 15); i++) {
+              const c = commits[i];
+              changelog.push({
+                hash: c.sha.slice(0, 7),
+                author: c.commit?.author?.name || 'Developer',
+                date: c.commit?.author?.date
+                  ? new Date(c.commit.author.date).toLocaleDateString()
+                  : '',
+                subject: c.commit?.message?.split('\n')[0] || '',
+              });
+            }
+          } else {
+            // Local commit is older than the last 30 commits or 'unknown'
+            commitsBehind = Math.max(1, commits.length);
+            for (let i = 0; i < Math.min(commits.length, 10); i++) {
+              const c = commits[i];
+              changelog.push({
+                hash: c.sha.slice(0, 7),
+                author: c.commit?.author?.name || 'Developer',
+                date: c.commit?.author?.date
+                  ? new Date(c.commit.author.date).toLocaleDateString()
+                  : '',
+                subject: c.commit?.message?.split('\n')[0] || '',
+              });
+            }
+          }
+        }
+
+        const nowIso = new Date().toISOString();
+        setSetting('app_update_last_checked', nowIso);
+        prefs.lastChecked = nowIso;
+      }
+    } catch (apiErr) {
+      console.warn('[AppUpdateService] GitHub API check error:', apiErr.message);
+    }
+
+    // METHOD 2: Fallback to Git CLI (if .git folder and git binary exist)
+    if (!gitHubApiSucceeded && hasGitRepo() && hasGit()) {
+      try {
+        if (forceFetch) {
+          console.log('[AppUpdateService] Running git fetch origin...');
+          execGit('git fetch origin', { timeout: 25000 });
+          const nowIso = new Date().toISOString();
+          setSetting('app_update_last_checked', nowIso);
+          prefs.lastChecked = nowIso;
+        }
+
+        remoteCommit = execGit('git rev-parse --short origin/main');
+        remoteCommitFull = execGit('git rev-parse origin/main');
+        remoteCommitDate = execGit('git log origin/main -1 --format=%cd --date=relative');
+        remoteCommitSubject = execGit('git log origin/main -1 --format=%s');
+
+        const countRaw = execGit('git rev-list HEAD..origin/main --count');
+        commitsBehind = parseInt(countRaw, 10) || 0;
+
+        if (commitsBehind > 0) {
+          const rawLog = execGit('git log HEAD..origin/main --format=%h|%an|%cr|%s -n 15');
+          if (rawLog) {
+            rawLog.split('\n').forEach((line) => {
+              const parts = line.split('|');
+              if (parts.length >= 4) {
+                changelog.push({
+                  hash: parts[0],
+                  author: parts[1],
+                  date: parts[2],
+                  subject: parts.slice(3).join('|'),
+                });
+              }
+            });
+          }
+        }
+      } catch (gitErr) {
+        console.warn('[AppUpdateService] Git CLI check fallback error:', gitErr.message);
+      }
     }
 
     const updateAvailable = commitsBehind > 0;
-    const isIgnored = Boolean(prefs.ignoredCommit && (prefs.ignoredCommit === remoteCommit || prefs.ignoredCommit === remoteCommitFull));
+    const isIgnored = Boolean(
+      prefs.ignoredCommit &&
+        (prefs.ignoredCommit === remoteCommit || prefs.ignoredCommit === remoteCommitFull)
+    );
     const isSnoozed = Boolean(prefs.askLaterUntil && Date.now() < prefs.askLaterUntil);
     const shouldPrompt = updateAvailable && !isIgnored && !isSnoozed;
 
     return {
-      currentCommit,
-      currentCommitFull,
-      currentCommitDate,
-      currentCommitSubject,
+      currentCommit: current.commit,
+      currentCommitFull: current.commitFull,
+      currentCommitDate: current.date,
+      currentCommitSubject: current.subject,
       remoteCommit,
       remoteCommitFull,
       remoteCommitDate,
@@ -175,6 +368,12 @@ class AppUpdateService {
     };
   }
 
+  /**
+   * Universal Update Application:
+   * Mode A: Uses Git pull / reset if .git repository exists.
+   * Mode B: Downloads latest repository ZIP directly from GitHub, safely extracts over ROOT_DIR,
+   *         while completely preserving all user data, database, worlds, and custom configs.
+   */
   async applyUpdate() {
     if (this.isUpdating) {
       throw new Error('An update is already in progress.');
@@ -186,12 +385,19 @@ class AppUpdateService {
     this.updateStage = 1;
 
     try {
-      // STEP 1: Safeguard User Data
+      // ------------------------------------------------------------------------
+      // STEP 1: Safeguard User Data & Database
+      // ------------------------------------------------------------------------
       this.updatePercent = 15;
       this.updateStage = 1;
-      this.updateProgress = 'Creating pre-update safety backup of database...';
+      this.updateProgress = 'Creating pre-update safety backup of database and user data...';
       const dbPath = path.join(ROOT_DIR, 'data', 'db', 'manager.db');
-      const dbBackupPath = path.join(ROOT_DIR, 'data', 'db', `manager.db.pre-update-${Date.now()}.bak`);
+      const dbBackupPath = path.join(
+        ROOT_DIR,
+        'data',
+        'db',
+        `manager.db.pre-update-${Date.now()}.bak`
+      );
       if (fs.existsSync(dbPath)) {
         try {
           fs.copyFileSync(dbPath, dbBackupPath);
@@ -201,18 +407,131 @@ class AppUpdateService {
         }
       }
 
-      // STEP 2: Pull Latest Commits
+      let newCommitInfo = null;
+      let usedGit = false;
+
+      // ------------------------------------------------------------------------
+      // STEP 2: Fetch and Apply Latest Code Changes
+      // ------------------------------------------------------------------------
       this.updatePercent = 35;
       this.updateStage = 2;
       this.updateProgress = 'Pulling latest code changes from GitHub (main)...';
-      console.log('[AppUpdateService] Pulling origin main...');
-      const pullOutput = execGit('git pull origin main', { timeout: 45000 });
-      console.log('[AppUpdateService] Pull result:', pullOutput);
 
-      // STEP 3: Dependencies Update (if needed)
+      if (hasGitRepo() && hasGit()) {
+        try {
+          console.log('[AppUpdateService] Attempting Git pull from origin...');
+          execGit('git fetch origin', { timeout: 35000 });
+          // Wipe unstaged changes in tracked files to prevent merge conflicts
+          try {
+            execGit('git reset --hard origin/main', { timeout: 15000 });
+          } catch (_) {
+            execGit('git pull --rebase=false origin main', { timeout: 35000 });
+          }
+          usedGit = true;
+          const shortHash = execGit('git rev-parse --short HEAD');
+          const fullHash = execGit('git rev-parse HEAD');
+          const date = execGit('git log -1 --format=%cd --date=relative');
+          const subject = execGit('git log -1 --format=%s');
+          newCommitInfo = {
+            commit: shortHash,
+            commitFull: fullHash,
+            date,
+            subject,
+          };
+          console.log(`[AppUpdateService] Git sync complete: #${shortHash}`);
+        } catch (gitErr) {
+          console.warn(
+            '[AppUpdateService] Git pull failed, falling back to direct GitHub download:',
+            gitErr.message
+          );
+        }
+      }
+
+      // If Git was not used or failed, download and extract main.zip directly
+      if (!usedGit) {
+        console.log('[AppUpdateService] Downloading latest repository archive from GitHub...');
+        const zipUrl = `https://github.com/${GITHUB_REPO}/archive/refs/heads/${GITHUB_BRANCH}.zip`;
+        const tempZip = path.join(os.tmpdir(), `bedrock-mgr-update-${Date.now()}.zip`);
+
+        const res = await fetch(zipUrl, {
+          headers: { 'User-Agent': 'BedrockServerManager-Updater' },
+          timeout: 45000,
+        });
+
+        if (!res.ok) {
+          throw new Error(`Failed to download repository archive: HTTP ${res.status}`);
+        }
+
+        const destFile = fs.createWriteStream(tempZip);
+        await new Promise((resolve, reject) => {
+          res.body.pipe(destFile);
+          res.body.on('error', reject);
+          destFile.on('finish', resolve);
+        });
+
+        this.updateProgress = 'Extracting updated files while safeguarding data...';
+        const zipDirectory = await unzipper.Open.file(tempZip);
+
+        // Find the root folder prefix inside the zip (e.g. 'FatGoats-Bedrock-Server-Manager-Plus-main/')
+        const topDir = zipDirectory.files[0]?.path?.split('/')?.[0] || '';
+
+        for (const entry of zipDirectory.files) {
+          if (entry.type === 'Directory') continue;
+
+          // Strip top-level zip folder prefix
+          let relPath = entry.path;
+          if (topDir && relPath.startsWith(`${topDir}/`)) {
+            relPath = relPath.substring(topDir.length + 1);
+          }
+
+          if (!relPath) continue;
+
+          // CRITICAL: NEVER overwrite user data, worlds, database, or nodejs runtime
+          const lower = relPath.toLowerCase().replace(/\\/g, '/');
+          if (
+            lower.startsWith('data/') ||
+            lower.startsWith('bds/') ||
+            lower.startsWith('nodejs/')
+          ) {
+            continue;
+          }
+
+          const targetFilePath = path.join(ROOT_DIR, relPath);
+          const targetDir = path.dirname(targetFilePath);
+
+          if (!fs.existsSync(targetDir)) {
+            fs.mkdirSync(targetDir, { recursive: true });
+          }
+
+          const buffer = await entry.buffer();
+          fs.writeFileSync(targetFilePath, buffer);
+        }
+
+        try {
+          fs.unlinkSync(tempZip);
+        } catch (_) {}
+
+        // Fetch latest commit metadata from GitHub to record accurate version
+        try {
+          const commits = await this.fetchGitHubCommits();
+          if (commits && commits.length > 0) {
+            const latest = commits[0];
+            newCommitInfo = {
+              commit: latest.sha.slice(0, 7),
+              commitFull: latest.sha,
+              date: latest.commit?.author?.date || new Date().toISOString(),
+              subject: latest.commit?.message?.split('\n')[0] || 'Latest version from GitHub',
+            };
+          }
+        } catch (_) {}
+      }
+
+      // ------------------------------------------------------------------------
+      // STEP 3: Dependencies Verification
+      // ------------------------------------------------------------------------
       this.updatePercent = 60;
       this.updateStage = 3;
-      this.updateProgress = 'Verifying and updating client dependencies...';
+      this.updateProgress = 'Verifying and updating application dependencies...';
       try {
         execSync('cmd /c "npm install --no-audit --no-fund"', {
           cwd: ROOT_DIR,
@@ -220,30 +539,34 @@ class AppUpdateService {
           timeout: 60000,
         });
       } catch (err) {
-        console.warn('[AppUpdateService] npm install notice:', err.message);
+        console.warn('[AppUpdateService] npm install note:', err.message);
       }
 
-      // STEP 4: Build React Frontend
+      // ------------------------------------------------------------------------
+      // STEP 4: Build React Frontend Assets
+      // ------------------------------------------------------------------------
       this.updatePercent = 80;
       this.updateStage = 4;
-      this.updateProgress = 'Compiling production frontend assets with Vite...';
+      this.updateProgress = 'Verifying production frontend build assets...';
       try {
         execSync('cmd /c "cd client && npm run build"', {
           cwd: ROOT_DIR,
           windowsHide: true,
           timeout: 60000,
         });
-        console.log('[AppUpdateService] Vite build complete.');
+        console.log('[AppUpdateService] Frontend build complete.');
       } catch (err) {
-        console.warn('[AppUpdateService] Client build notice:', err.message);
+        console.warn('[AppUpdateService] Client build note (using repository dist):', err.message);
       }
 
-      // STEP 5: Rebuild Windows Tray Executable (if C# compiler exists)
+      // ------------------------------------------------------------------------
+      // STEP 5: Recompile Windows Native Tray Launcher Binary
+      // ------------------------------------------------------------------------
       this.updatePercent = 95;
       this.updateStage = 5;
       this.updateProgress = 'Recompiling BedrockServerManager.exe Windows tray launcher...';
       const cscPath = 'C:\\Windows\\Microsoft.NET\\Framework64\\v4.0.30319\\csc.exe';
-      if (fs.existsSync(cscPath)) {
+      if (fs.existsSync(cscPath) && fs.existsSync(path.join(ROOT_DIR, 'tray', 'Program.cs'))) {
         try {
           execSync(
             `"${cscPath}" /target:winexe /out:BedrockServerManager.exe /win32icon:tray\\app.ico /r:System.dll,System.Drawing.dll,System.Windows.Forms.dll,System.Core.dll tray\\Program.cs`,
@@ -255,22 +578,28 @@ class AppUpdateService {
           );
           console.log('[AppUpdateService] Recompiled BedrockServerManager.exe.');
         } catch (err) {
-          console.warn('[AppUpdateService] Tray recompile notice:', err.message);
+          console.warn('[AppUpdateService] Tray recompile note:', err.message);
         }
       }
 
-      // Clear snooze and ignored commit since update was applied
+      // ------------------------------------------------------------------------
+      // STEP 6: Save Version Metadata & Reset Preferences
+      // ------------------------------------------------------------------------
+      if (newCommitInfo) {
+        this.saveCurrentVersion(newCommitInfo);
+      }
+
       setSetting('app_update_ignored_commit', '');
       setSetting('app_update_ask_later_until', '0');
 
       this.updatePercent = 100;
       this.updateProgress = 'Update successfully applied!';
-      const newCommit = execGit('git rev-parse --short HEAD');
+      const finalCommit = newCommitInfo?.commit || this.getCurrentVersion().commit;
 
       return {
         success: true,
-        newCommit,
-        message: `App successfully updated to commit #${newCommit}. All worlds, player data, and configurations were safely preserved.`,
+        newCommit: finalCommit,
+        message: `App successfully updated to commit #${finalCommit}. All worlds, player databases, and configurations were safely preserved.`,
       };
     } finally {
       this.isUpdating = false;

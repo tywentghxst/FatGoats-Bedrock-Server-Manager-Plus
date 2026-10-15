@@ -1,6 +1,6 @@
 {
-  "commit": "788b374",
-  "commitFull": "788b37477546f6a0bc5ce414895333ae74878af2",
-  "date": "14 minutes ago",
-  "subject": "chore: sync version.json with commit f8d1fcb"
+  "commit": "d44bb14",
+  "commitFull": "d44bb1401f1f80e9f1e12ff1f004ff648c1e8b8b",
+  "date": "2 minutes ago",
+  "subject": "fix(updater): safeguard Windows file locks on running executables during in-app updates"
 }

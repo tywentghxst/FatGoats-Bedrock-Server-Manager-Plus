@@ -34,7 +34,7 @@ function getDefaultProperties() {
     'player-movement-duration-threshold-in-ms': '500',
     'correct-player-movement': 'false',
     'server-authoritative-block-breaking': 'false',
-    'transport': 'raknet'
+    'transport': 'nethernet'
   };
 }
 

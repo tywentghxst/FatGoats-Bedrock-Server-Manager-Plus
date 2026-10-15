@@ -23,11 +23,43 @@ function readPermissionsFile() {
 }
 
 /**
- * Write BDS permissions.json safely
+ * Write BDS permissions.json safely.
+ * BDS strictly expects an array of objects with "permission" and "xuid".
+ * If an entry lacks "xuid" but has "name", this helper resolves the xuid from SQLite.
  */
 function writePermissionsFile(permissionsList) {
   try {
-    fs.writeFileSync(PERMISSIONS_FILE, JSON.stringify(permissionsList, null, 2), 'utf8');
+    const list = Array.isArray(permissionsList) ? permissionsList : [];
+    const sanitized = [];
+    const seenXuids = new Set();
+
+    for (const item of list) {
+      if (!item || typeof item !== 'object') continue;
+      const perm = item.permission || 'member';
+      let xuid = item.xuid ? String(item.xuid).trim() : null;
+      const name = item.name ? String(item.name).trim() : null;
+
+      if (!xuid && name) {
+        try {
+          const row = db.prepare('SELECT xuid FROM players WHERE lower(name) = lower(?) AND xuid IS NOT NULL').get(name);
+          if (row && row.xuid) {
+            xuid = String(row.xuid).trim();
+          }
+        } catch (_) {}
+      }
+
+      // BDS produces a loud warning if an entry has no xuid:
+      // "xuid or permission missing from permissions file: permissions.json"
+      if (xuid && !seenXuids.has(xuid)) {
+        seenXuids.add(xuid);
+        sanitized.push({
+          permission: perm,
+          xuid
+        });
+      }
+    }
+
+    fs.writeFileSync(PERMISSIONS_FILE, JSON.stringify(sanitized, null, 2), 'utf8');
   } catch (err) {
     console.error('[PlayerService] Failed writing permissions.json:', err.message);
   }
@@ -65,10 +97,18 @@ function writeAllowlistFile(allowlist) {
  */
 function isOperatorInFile(name, xuid, permsList) {
   const list = permsList || readPermissionsFile();
+  let resolvedXuid = xuid ? String(xuid) : null;
+  if (!resolvedXuid && name) {
+    try {
+      const row = db.prepare('SELECT xuid FROM players WHERE lower(name) = lower(?) AND xuid IS NOT NULL').get(name);
+      if (row && row.xuid) resolvedXuid = String(row.xuid);
+    } catch (_) {}
+  }
+
   return list.some((entry) => {
     const isOp = (entry.permission === 'operator' || entry.permission === 'admin');
     if (!isOp) return false;
-    if (xuid && entry.xuid && String(entry.xuid) === String(xuid)) return true;
+    if (resolvedXuid && entry.xuid && String(entry.xuid) === resolvedXuid) return true;
     if (name && entry.name && entry.name.toLowerCase() === name.toLowerCase()) return true;
     return false;
   });
@@ -79,8 +119,16 @@ function isOperatorInFile(name, xuid, permsList) {
  */
 function getPermissionFromFile(name, xuid, permsList) {
   const list = permsList || readPermissionsFile();
+  let resolvedXuid = xuid ? String(xuid) : null;
+  if (!resolvedXuid && name) {
+    try {
+      const row = db.prepare('SELECT xuid FROM players WHERE lower(name) = lower(?) AND xuid IS NOT NULL').get(name);
+      if (row && row.xuid) resolvedXuid = String(row.xuid);
+    } catch (_) {}
+  }
+
   const found = list.find((entry) => {
-    if (xuid && entry.xuid && String(entry.xuid) === String(xuid)) return true;
+    if (resolvedXuid && entry.xuid && String(entry.xuid) === resolvedXuid) return true;
     if (name && entry.name && entry.name.toLowerCase() === name.toLowerCase()) return true;
     return false;
   });
@@ -122,11 +170,29 @@ function recordPlayerJoin(name, xuid = null) {
             permission = ?
         WHERE id = ?
       `).run(now, xuid, finalOp, finalOp ? 'operator' : (existing.permission || perm), existing.id);
+
+      // Auto-heal permissions.json if player is OP or custom permission
+      if (xuid && (finalOp || perm === 'operator' || perm === 'visitor')) {
+        const targetPerm = finalOp ? 'operator' : perm;
+        const foundIdx = perms.findIndex((e) => String(e.xuid) === String(xuid));
+        if (foundIdx === -1) {
+          perms.push({ permission: targetPerm, xuid: String(xuid) });
+          writePermissionsFile(perms);
+        } else if (perms[foundIdx].permission !== targetPerm) {
+          perms[foundIdx].permission = targetPerm;
+          writePermissionsFile(perms);
+        }
+      }
     } else {
       db.prepare(`
         INSERT INTO players (name, xuid, permission, is_op, is_online, first_seen, last_seen)
         VALUES (?, ?, ?, ?, 1, ?, ?)
       `).run(name, xuid, perm, isOp, now, now);
+
+      if (xuid && (isOp || perm === 'operator' || perm === 'visitor')) {
+        perms.push({ permission: isOp ? 'operator' : perm, xuid: String(xuid) });
+        writePermissionsFile(perms);
+      }
     }
     console.log(`[PlayerService] Player joined: ${name} (xuid: ${xuid || 'N/A'}, OP: ${isOp ? 'Yes' : 'No'})`);
   } catch (err) {
@@ -173,9 +239,13 @@ function getPlayers(activeServerProcess = null) {
     // Auto-discover and persist players from permissions.json not yet in SQLite
     for (const p of perms) {
       const pName = p.name ? p.name.trim() : null;
-      if (!pName) continue;
-      const foundInDb = all.find((row) => row.name.toLowerCase() === pName.toLowerCase());
-      if (!foundInDb) {
+      const pXuid = p.xuid ? String(p.xuid).trim() : null;
+      if (!pName && !pXuid) continue;
+      const foundInDb = all.find((row) =>
+        (pXuid && row.xuid && String(row.xuid) === pXuid) ||
+        (pName && row.name && row.name.toLowerCase() === pName.toLowerCase())
+      );
+      if (!foundInDb && pName) {
         try {
           const now = new Date().toISOString();
           const isOp = (p.permission === 'operator' || p.permission === 'admin') ? 1 : 0;
@@ -299,6 +369,12 @@ async function setPlayerOp(name, isOp, serverProcess = null) {
   const cleanName = name.trim();
   const perms = readPermissionsFile();
 
+  let playerXuid = null;
+  try {
+    const row = db.prepare('SELECT xuid FROM players WHERE lower(name) = lower(?) AND xuid IS NOT NULL').get(cleanName);
+    if (row && row.xuid) playerXuid = String(row.xuid).trim();
+  } catch (_) {}
+
   // 1. Send command to live BDS server if running
   if (serverProcess && serverProcess.state === 'running') {
     try {
@@ -311,17 +387,19 @@ async function setPlayerOp(name, isOp, serverProcess = null) {
 
   // 2. Update permissions.json directly
   let existingIndex = perms.findIndex(
-    (e) => (e.name && e.name.toLowerCase() === cleanName.toLowerCase())
+    (e) => (playerXuid && e.xuid && String(e.xuid) === playerXuid) ||
+           (e.name && e.name.toLowerCase() === cleanName.toLowerCase())
   );
 
   if (isOp) {
     if (existingIndex >= 0) {
       perms[existingIndex].permission = 'operator';
-      if (!perms[existingIndex].name) perms[existingIndex].name = cleanName;
+      if (playerXuid) perms[existingIndex].xuid = playerXuid;
+      else if (!perms[existingIndex].name) perms[existingIndex].name = cleanName;
     } else {
       perms.push({
         permission: 'operator',
-        name: cleanName
+        ...(playerXuid ? { xuid: playerXuid } : { name: cleanName })
       });
     }
   } else {
@@ -374,6 +452,12 @@ async function setPlayerPermission(name, permissionLevel, serverProcess = null) 
 
   const perms = readPermissionsFile();
 
+  let playerXuid = null;
+  try {
+    const row = db.prepare('SELECT xuid FROM players WHERE lower(name) = lower(?) AND xuid IS NOT NULL').get(cleanName);
+    if (row && row.xuid) playerXuid = String(row.xuid).trim();
+  } catch (_) {}
+
   // 1. Live server command
   if (serverProcess && serverProcess.state === 'running') {
     try {
@@ -390,7 +474,8 @@ async function setPlayerPermission(name, permissionLevel, serverProcess = null) 
 
   // 2. Update permissions.json
   const existingIndex = perms.findIndex(
-    (e) => (e.name && e.name.toLowerCase() === cleanName.toLowerCase())
+    (e) => (playerXuid && e.xuid && String(e.xuid) === playerXuid) ||
+           (e.name && e.name.toLowerCase() === cleanName.toLowerCase())
   );
 
   if (targetLevel === 'member') {
@@ -398,11 +483,12 @@ async function setPlayerPermission(name, permissionLevel, serverProcess = null) 
   } else {
     if (existingIndex >= 0) {
       perms[existingIndex].permission = targetLevel;
-      if (!perms[existingIndex].name) perms[existingIndex].name = cleanName;
+      if (playerXuid) perms[existingIndex].xuid = playerXuid;
+      else if (!perms[existingIndex].name) perms[existingIndex].name = cleanName;
     } else {
       perms.push({
         permission: targetLevel,
-        name: cleanName
+        ...(playerXuid ? { xuid: playerXuid } : { name: cleanName })
       });
     }
   }

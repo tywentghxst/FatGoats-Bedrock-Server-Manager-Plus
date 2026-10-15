@@ -169,8 +169,8 @@ const PROPERTY_METADATA = {
     label: 'Network Transport Protocol',
     category: 'network',
     icon: '📡',
-    description: 'Network transport protocol. "raknet" is required for Playit.gg tunnels and standard Bedrock proxy routing. "nethernet" is Mojang\'s newer peer transport.',
-    options: ['raknet', 'nethernet'],
+    description: 'Network transport protocol. "nethernet" is Mojang\'s required transport protocol in BDS 1.26+. "raknet" is legacy Bedrock UDP routing.',
+    options: ['nethernet', 'raknet'],
   },
 };
 

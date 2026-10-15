@@ -388,6 +388,7 @@ namespace BedrockServerManager.Tray
                 // Add Java paths to PATH so sub-processes inherit java seamlessly
                 string[] javaCandidates = new string[]
                 {
+                    Path.Combine(appDir, @"jre\bin"),
                     @"C:\Program Files\Common Files\Oracle\Java\javapath",
                     @"C:\Program Files (x86)\Common Files\Oracle\Java\javapath",
                 };

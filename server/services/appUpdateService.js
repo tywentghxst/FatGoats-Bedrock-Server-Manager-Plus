@@ -553,12 +553,13 @@ class AppUpdateService {
 
           if (!relPath) continue;
 
-          // CRITICAL: NEVER overwrite user data, worlds, database, or nodejs runtime
+          // CRITICAL: NEVER overwrite user data, worlds, database, nodejs runtime, or jre runtime
           const lower = relPath.toLowerCase().replace(/\\/g, '/');
           if (
             lower.startsWith('data/') ||
             lower.startsWith('bds/') ||
-            lower.startsWith('nodejs/')
+            lower.startsWith('nodejs/') ||
+            lower.startsWith('jre/')
           ) {
             continue;
           }

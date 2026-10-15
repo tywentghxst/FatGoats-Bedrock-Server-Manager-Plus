@@ -47,6 +47,8 @@ namespace BedrockServerManager.Installer
 
         private const string REPO_ZIP_URL = "https://github.com/tywentghxst/FatGoats-Bedrock-Server-Manager-Plus/archive/refs/heads/main.zip";
         private const string NODE_ZIP_URL = "https://nodejs.org/dist/v20.18.0/node-v20.18.0-win-x64.zip";
+        private const string JAVA_ZIP_URL = "https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.12.1%2B1/OpenJDK21U-jre_x64_windows_hotspot_21.0.12.1_1.zip";
+        private const string JAVA_API_URL = "https://api.adoptium.net/v3/binary/latest/21/ga/windows/x64/jre/hotspot/normal/eclipse?project=jdk";
         private const string REG_UNINSTALL_KEY = @"Software\Microsoft\Windows\CurrentVersion\Uninstall\BedrockServerManagerPlus";
 
         private string initialMode = "install"; // "install" | "uninstall" | "reinstall"
@@ -625,6 +627,118 @@ namespace BedrockServerManager.Installer
             }
         }
 
+        private void ResolveOrInstallJava(string targetDir)
+        {
+            worker.ReportProgress(18, "Checking system for Java 17+ runtime (Xbox Live bot dependency)...");
+
+            string localJre = Path.Combine(targetDir, "jre", "bin", "java.exe");
+            if (File.Exists(localJre) && IsJavaVersionCompatible(localJre))
+            {
+                worker.ReportProgress(24, "Found local Java runtime at " + Path.Combine(targetDir, "jre"));
+                return;
+            }
+
+            string javaHome = Environment.GetEnvironmentVariable("JAVA_HOME");
+            if (!string.IsNullOrEmpty(javaHome))
+            {
+                string jhExe = Path.Combine(javaHome, "bin", "java.exe");
+                if (File.Exists(jhExe) && IsJavaVersionCompatible(jhExe))
+                {
+                    worker.ReportProgress(24, string.Format("Found compatible Java in JAVA_HOME: {0}", jhExe));
+                    return;
+                }
+            }
+
+            string[] wellKnown = new string[]
+            {
+                @"C:\Program Files\Common Files\Oracle\Java\javapath\java.exe",
+                @"C:\Program Files (x86)\Common Files\Oracle\Java\javapath\java.exe",
+                @"C:\Program Files\Java",
+                @"C:\Program Files\Eclipse Adoptium",
+                @"C:\Program Files\Microsoft",
+                @"C:\Program Files\Amazon Corretto",
+                @"C:\Program Files\Zulu",
+                @"C:\Program Files\BellSoft"
+            };
+
+            foreach (string entry in wellKnown)
+            {
+                if (entry.EndsWith("java.exe", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (File.Exists(entry) && IsJavaVersionCompatible(entry))
+                    {
+                        worker.ReportProgress(24, string.Format("Found compatible Java at {0}", entry));
+                        return;
+                    }
+                }
+                else if (Directory.Exists(entry))
+                {
+                    try
+                    {
+                        foreach (string sub in Directory.GetDirectories(entry))
+                        {
+                            string candidate = Path.Combine(sub, "bin", "java.exe");
+                            if (File.Exists(candidate) && IsJavaVersionCompatible(candidate))
+                            {
+                                worker.ReportProgress(24, string.Format("Found compatible Java at {0}", candidate));
+                                return;
+                            }
+                        }
+                    }
+                    catch { }
+                }
+            }
+
+            // Check system PATH
+            if (IsJavaVersionCompatible("java"))
+            {
+                worker.ReportProgress(24, "Found compatible Java runtime in system PATH.");
+                return;
+            }
+
+            worker.ReportProgress(19, "Java 17+ was not detected. Automatically downloading Eclipse Adoptium Temurin OpenJDK 21 LTS runtime...");
+            string tempJavaZip = Path.Combine(Path.GetTempPath(), string.Format("java21-lts-{0}.zip", Environment.TickCount));
+            string tempJavaExtract = Path.Combine(Path.GetTempPath(), string.Format("java-extract-{0}", Environment.TickCount));
+
+            try
+            {
+                ServicePointManager.SecurityProtocol = (SecurityProtocolType)3072 | SecurityProtocolType.Tls;
+                using (WebClient client = new WebClient())
+                {
+                    client.Headers.Add("User-Agent", "BedrockServerManager-Setup");
+                    try
+                    {
+                        client.DownloadFile(JAVA_ZIP_URL, tempJavaZip);
+                    }
+                    catch
+                    {
+                        client.DownloadFile(JAVA_API_URL, tempJavaZip);
+                    }
+                }
+
+                worker.ReportProgress(22, "Extracting bundled Java 21 LTS runtime...");
+                if (Directory.Exists(tempJavaExtract)) Directory.Delete(tempJavaExtract, true);
+                Directory.CreateDirectory(tempJavaExtract);
+                ExtractZipArchiveSafely(tempJavaZip, tempJavaExtract);
+
+                string[] subDirs = Directory.GetDirectories(tempJavaExtract);
+                string sourceJavaDir = subDirs.Length > 0 ? subDirs[0] : tempJavaExtract;
+                string destJavaDir = Path.Combine(targetDir, "jre");
+
+                CopyDirectoryRecursive(sourceJavaDir, destJavaDir);
+                worker.ReportProgress(24, "Bundled Java 21 LTS configured at " + destJavaDir);
+            }
+            catch (Exception ex)
+            {
+                worker.ReportProgress(24, "Notice: Java auto-download failed (" + ex.Message + "). You can install Java 17+ manually from https://adoptium.net.");
+            }
+            finally
+            {
+                try { File.Delete(tempJavaZip); } catch { }
+                try { Directory.Delete(tempJavaExtract, true); } catch { }
+            }
+        }
+
         private void RegisterInWindowsUninstall(string targetDir)
         {
             try
@@ -638,7 +752,7 @@ namespace BedrockServerManager.Installer
                         string iconPath = Path.Combine(targetDir, "tray", "app.ico");
 
                         key.SetValue("DisplayName", "Bedrock Server Manager Plus");
-                        key.SetValue("DisplayVersion", "1.2.2");
+                        key.SetValue("DisplayVersion", "1.2.3");
                         key.SetValue("Publisher", "FatGoats");
                         key.SetValue("InstallLocation", targetDir);
                         key.SetValue("DisplayIcon", File.Exists(iconPath) ? iconPath : exePath);
@@ -771,6 +885,9 @@ namespace BedrockServerManager.Installer
 
                 // 2. Resolve or Install Node.js runtime
                 NodeInfo node = ResolveOrInstallNode(targetDir);
+
+                // 2b. Resolve or Install Java 17+ runtime (Xbox Live bot dependency)
+                ResolveOrInstallJava(targetDir);
 
                 // 3. Download repository package from GitHub
                 string tempZip = Path.Combine(Path.GetTempPath(), string.Format("bedrock-mgr-setup-{0}.zip", Environment.TickCount));
@@ -1026,6 +1143,59 @@ namespace BedrockServerManager.Installer
             {
                 return null;
             }
+        }
+
+        private string RunCommandAndGetFullOutput(string exe, string args)
+        {
+            try
+            {
+                ProcessStartInfo psi = new ProcessStartInfo
+                {
+                    FileName = exe,
+                    Arguments = args,
+                    UseShellExecute = false,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    CreateNoWindow = true
+                };
+                using (Process p = Process.Start(psi))
+                {
+                    string stdout = p.StandardOutput.ReadToEnd();
+                    string stderr = p.StandardError.ReadToEnd();
+                    p.WaitForExit(5000);
+                    return (stdout ?? "") + " " + (stderr ?? "");
+                }
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private bool IsJavaVersionCompatible(string javaExe)
+        {
+            try
+            {
+                string outText = RunCommandAndGetFullOutput(javaExe, "-version");
+                if (string.IsNullOrEmpty(outText)) return false;
+
+                System.Text.RegularExpressions.Match m = System.Text.RegularExpressions.Regex.Match(
+                    outText,
+                    @"version\s+""?(\d+)(\.\d+)?",
+                    System.Text.RegularExpressions.RegexOptions.IgnoreCase
+                );
+                if (m.Success)
+                {
+                    int major;
+                    if (int.TryParse(m.Groups[1].Value, out major))
+                    {
+                        if (major == 1) return false; // Java 1.8 is incompatible
+                        return major >= 17;
+                    }
+                }
+            }
+            catch { }
+            return false;
         }
 
         private void CopyDirectoryRecursive(string sourceDir, string targetDir)

@@ -165,11 +165,42 @@ class BroadcasterService {
     return this.getConfig();
   }
 
+  getLocalLanIp() {
+    const os = require('os');
+    try {
+      const nets = os.networkInterfaces();
+      for (const name of Object.keys(nets)) {
+        for (const net of nets[name]) {
+          if (net.family === 'IPv4' && !net.internal) {
+            if (net.address.startsWith('192.168.') || net.address.startsWith('10.')) {
+              return net.address;
+            }
+          }
+        }
+      }
+      for (const name of Object.keys(nets)) {
+        for (const net of nets[name]) {
+          if (net.family === 'IPv4' && !net.internal) {
+            return net.address;
+          }
+        }
+      }
+    } catch (_) {}
+    return '127.0.0.1';
+  }
+
   writeConfigFile() {
     const cfg = this.getConfig();
     const serverName = cfg.serverName || 'Bedrock Dedicated Realm';
     // When autoSyncPlayit is true and Playit is active, use the live Playit tunnel destination
-    const targetIp = (cfg.autoSyncPlayit && cfg.isPlayitSynced && cfg.effectiveIp) ? cfg.effectiveIp : (cfg.targetIp || '127.0.0.1');
+    let targetIp = (cfg.autoSyncPlayit && cfg.isPlayitSynced && cfg.effectiveIp) ? cfg.effectiveIp : (cfg.targetIp || '127.0.0.1');
+    // If targetIp is loopback and not Playit-synced, resolve to LAN IP so consoles on home Wi-Fi can connect
+    if ((targetIp === '127.0.0.1' || targetIp === 'localhost') && (!cfg.isPlayitSynced)) {
+      const lanIp = this.getLocalLanIp();
+      if (lanIp && lanIp !== '127.0.0.1') {
+        targetIp = lanIp;
+      }
+    }
     const targetPort = (cfg.autoSyncPlayit && cfg.isPlayitSynced && cfg.effectivePort) ? cfg.effectivePort : (cfg.targetPort || 19132);
     const autoAccept = cfg.autoAcceptFriends ? 'true' : 'false';
 
@@ -206,7 +237,7 @@ notifications:
   webhook-url: ''
 
 debug-mode: false
-suppress-session-update-message: false
+suppress-session-update-message: true
 `;
 
     try {
@@ -529,7 +560,14 @@ suppress-session-update-message: false
     const uncolored = clean.replace(/\x1B\[[0-9;]*[a-zA-Z]/g, '').trim();
 
     console.log(`[MCXboxBroadcast] ${uncolored}`);
-    this._logActivity('LOG', uncolored);
+
+    // Filter heartbeat spam & internal WebRTC candidate probes from user activity list
+    const isNoisyHeartbeat = uncolored.includes('Updated session!');
+    const isInternalRtcProbe = uncolored.includes('IceTransport::LogCallback') || uncolored.includes('juice: Send failed') || uncolored.includes('juice: Got TURN');
+
+    if (!isNoisyHeartbeat && !isInternalRtcProbe) {
+      this._logActivity('LOG', uncolored);
+    }
 
     // 1. Detect device login prompt:
     // e.g. "To sign in, use a web browser to open the page https://www.microsoft.com/link and use the code 8STYVU6P or visit http://microsoft.com/link?otc=8STYVU6P"
@@ -616,9 +654,14 @@ suppress-session-update-message: false
     }
 
     // 4. Detect player redirect / join
-    if (uncolored.includes('Redirecting') || uncolored.includes('Transferring') || uncolored.includes('Connected client') || uncolored.includes('Player joined')) {
+    if (uncolored.includes('Transferred') || uncolored.includes('Transferring') || uncolored.includes('Redirecting') || uncolored.includes('Connected client') || uncolored.includes('Player joined')) {
       this.totalRedirects += 1;
-      this._logActivity('REDIRECT', `Player join detected: ${uncolored}`);
+      const transferMatch = uncolored.match(/Transferred bedrock client\s+([^(]+?)(?:\s+\(([0-9]+)\))?\s+to/i);
+      if (transferMatch) {
+        this._logActivity('REDIRECT', `🎮 Player connected: ${transferMatch[1].trim()} transferred to Bedrock server!`);
+      } else {
+        this._logActivity('REDIRECT', `Player join detected: ${uncolored}`);
+      }
     }
 
     // 5. Detect friend auto-accept

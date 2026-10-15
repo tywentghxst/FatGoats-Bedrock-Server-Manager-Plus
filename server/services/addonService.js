@@ -1259,64 +1259,174 @@ async function executeBulk(action, targetUuids = null, options = {}) {
 }
 
 /**
- * Search the web (using DuckDuckGo HTML) for addon URLs, images, snippets, and site metadata.
- * Enriches results with open graph images and site favicons.
+ * Helper to decode Bing result redirect URLs (/ck/a?...)
+ * In Bing HTML, link hrefs are wrapped as &u=a1<base64> or u=a1<base64>
+ */
+function decodeBingUrl(rawUrl) {
+  try {
+    const cleanUrl = (rawUrl || '').replace(/&amp;/g, '&');
+    if (cleanUrl.includes('/ck/a?') && cleanUrl.includes('u=')) {
+      const parsed = new URL(cleanUrl);
+      const u = parsed.searchParams.get('u');
+      if (u) {
+        const b64 = u.startsWith('a1') ? u.substring(2) : u;
+        return Buffer.from(b64, 'base64').toString('utf8');
+      }
+    }
+    return cleanUrl;
+  } catch (_) {
+    return rawUrl;
+  }
+}
+
+const KNOWN_MINECRAFT_DOMAINS = [
+  'minecraft.net',
+  'curseforge.com',
+  'mcpedl.com',
+  'chunk.gg',
+  'mcmarketplace.net',
+  'minecraftpal.com',
+  'bedrockuniverse.com',
+  'bedrockexplorer.com',
+  'planetminecraft.com',
+  'blockfactory.studio',
+  'sparkuniverse.com',
+  '9minecraft.net'
+];
+
+function isMinecraftRelevant(item) {
+  try {
+    const host = new URL(item.url).hostname.toLowerCase();
+    if (KNOWN_MINECRAFT_DOMAINS.some((d) => host.includes(d))) return true;
+  } catch (_) {
+    return false;
+  }
+
+  const text = `${item.title || ''} ${item.snippet || ''}`.toLowerCase();
+  return text.includes('minecraft') || (text.includes('bedrock') && text.includes('addon'));
+}
+
+/**
+ * Perform a single Bing search query and extract parsed results.
+ */
+async function fetchBingSearchResults(term) {
+  try {
+    const u = 'https://www.bing.com/search?q=' + encodeURIComponent(term);
+    const res = await fetch(u, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9'
+      },
+      signal: AbortSignal.timeout(5000)
+    });
+    if (!res.ok) return [];
+
+    const html = await res.text();
+    const items = [];
+    const re = /<li class="b_algo"[\s\S]*?<\/li>/gi;
+    let m;
+    while ((m = re.exec(html)) !== null && items.length < 8) {
+      const block = m[0];
+      const h2Match = block.match(/<h2><a[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/i);
+      if (!h2Match) continue;
+      const rawHref = h2Match[1];
+      const link = decodeBingUrl(rawHref);
+      if (!link.startsWith('http')) continue;
+
+      const title = h2Match[2].replace(/<[^>]+>/g, '').trim();
+      const snippetMatch = block.match(/<div class="b_caption">[\s\S]*?<p[^>]*>([\s\S]*?)<\/p>/i);
+      const snippet = snippetMatch ? snippetMatch[1].replace(/<[^>]+>/g, '').trim() : '';
+      const candidate = { url: link, title, snippet };
+      if (isMinecraftRelevant(candidate)) {
+        items.push(candidate);
+      }
+    }
+    return items;
+  } catch (err) {
+    return [];
+  }
+}
+
+/**
+ * Search the web for addon URLs, images, titles, and site metadata.
+ * Directly searches Bing for Minecraft Marketplace (official), CurseForge, MCPEDL, Chunk, etc.
+ * Enriches results with open graph images and site favicons, prioritizing official marketplace pages.
  */
 async function searchAddonUrl(query) {
   try {
-    const searchTerms = `${query} minecraft bedrock addon`;
-    const ddgUrl = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(searchTerms)}`;
-    const res = await fetch(ddgUrl, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
-      },
-      signal: AbortSignal.timeout(6000)
-    });
+    const cleanQuery = (query || '').trim();
+    if (!cleanQuery) return [];
 
-    if (!res.ok) {
-      return [];
+    // Run parallel searches: specific marketplace query and general bedrock addon query
+    const [marketResults, generalResults] = await Promise.all([
+      fetchBingSearchResults(`${cleanQuery} minecraft marketplace addon`).catch(() => []),
+      fetchBingSearchResults(`minecraft bedrock addon ${cleanQuery}`).catch(() => [])
+    ]);
+
+    const combined = [];
+    const seenUrls = new Set();
+    // Combine marketplace results first, followed by general addon results
+    for (const item of [...marketResults, ...generalResults]) {
+      const norm = item.url.split('?')[0].replace(/\/+$/, '').toLowerCase();
+      if (seenUrls.has(norm)) continue;
+      seenUrls.add(norm);
+      combined.push(item);
     }
 
-    const html = await res.text();
-    const rawResults = [];
-
-    // Match DDG results
-    const titleRegex = /<h2 class="result__title">[\s\S]*?<a rel="nofollow" class="result__a" href="([^"]+)"[^>]*>([\s\S]*?)<\/a>[\s\S]*?<\/h2>[\s\S]*?<a class="result__snippet[^"]*"[^>]*>([\s\S]*?)<\/a>/gi;
-    let match;
-    while ((match = titleRegex.exec(html)) !== null && rawResults.length < 6) {
-      let rawHref = match[1];
-      if (rawHref.includes('uddg=')) {
-        try {
-          rawHref = decodeURIComponent(rawHref.split('uddg=')[1].split('&')[0]);
-        } catch (_) {}
-      }
-      const title = match[2].replace(/<[^>]+>/g, '').trim();
-      const snippet = match[3].replace(/<[^>]+>/g, '').trim();
-
-      if (rawHref.startsWith('http')) {
-        rawResults.push({ url: rawHref, title, snippet });
-      }
-    }
-
-    // Enrich top results with OG images / site names
-    const enriched = await Promise.all(rawResults.map(async (item) => {
+    // Enrich top 7 results
+    const topItems = combined.slice(0, 7);
+    const enriched = await Promise.all(topItems.map(async (item) => {
       let image = null;
       let siteName = '';
+      let isMarketplace = false;
+      let isOfficialMarketplace = false;
+
       try {
         const u = new URL(item.url);
         siteName = u.hostname.replace(/^www\./, '');
-        const pageRes = await fetch(item.url, {
-          headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
-          signal: AbortSignal.timeout(3000)
-        });
-        if (pageRes.ok) {
-          const pageHtml = await pageRes.text();
-          const ogMatch = pageHtml.match(/<meta[^>]*property=["']og:image["'][^>]*content=["']([^"']+)["']/i) ||
-                          pageHtml.match(/<meta[^>]*content=["']([^"']+)["'][^>]*property=["']og:image["']/i) ||
-                          pageHtml.match(/<meta[^>]*name=["']twitter:image["'][^>]*content=["']([^"']+)["']/i);
-          if (ogMatch && ogMatch[1] && ogMatch[1].startsWith('http')) {
-            image = ogMatch[1];
+
+        if (siteName.includes('minecraft.net')) {
+          siteName = 'Minecraft Marketplace';
+          isMarketplace = true;
+          isOfficialMarketplace = true;
+          image = 'https://www.minecraft.net/content/dam/minecraftnet/franchise/logos/minecraft-creeper-face.jpg';
+        } else if (siteName.includes('chunk.gg')) {
+          siteName = 'Chunk Marketplace';
+          isMarketplace = true;
+        } else if (siteName.includes('mcmarketplace.net')) {
+          siteName = 'Marketplace Catalog';
+          isMarketplace = true;
+        } else if (siteName.includes('minecraftpal.com')) {
+          siteName = 'MinecraftPal Marketplace';
+          isMarketplace = true;
+        } else if (siteName.includes('bedrockuniverse.com')) {
+          siteName = 'Bedrock Universe';
+          isMarketplace = true;
+        } else if (siteName.includes('curseforge.com')) {
+          siteName = 'CurseForge';
+        } else if (siteName.includes('mcpedl.com')) {
+          siteName = 'MCPEDL';
+        } else if (siteName.includes('planetminecraft.com')) {
+          siteName = 'Planet Minecraft';
+        } else if (siteName.includes('youtube.com')) {
+          siteName = 'YouTube';
+        }
+
+        // Try fetching page OG image if not already set or if community site
+        if (!image) {
+          const pageRes = await fetch(item.url, {
+            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+            signal: AbortSignal.timeout(2000)
+          });
+          if (pageRes.ok) {
+            const pageHtml = await pageRes.text();
+            const ogMatch = pageHtml.match(/<meta[^>]*property=["']og:image["'][^>]*content=["']([^"']+)["']/i) ||
+                            pageHtml.match(/<meta[^>]*content=["']([^"']+)["'][^>]*property=["']og:image["']/i) ||
+                            pageHtml.match(/<meta[^>]*name=["']twitter:image["'][^>]*content=["']([^"']+)["']/i);
+            if (ogMatch && ogMatch[1] && ogMatch[1].startsWith('http')) {
+              image = ogMatch[1];
+            }
           }
         }
       } catch (_) {}
@@ -1331,9 +1441,20 @@ async function searchAddonUrl(query) {
       return {
         ...item,
         image,
-        siteName
+        siteName,
+        isMarketplace,
+        isOfficialMarketplace
       };
     }));
+
+    // Prioritize official Minecraft Marketplace first, then other marketplace entries
+    enriched.sort((a, b) => {
+      if (a.isOfficialMarketplace && !b.isOfficialMarketplace) return -1;
+      if (!a.isOfficialMarketplace && b.isOfficialMarketplace) return 1;
+      if (a.isMarketplace && !b.isMarketplace) return -1;
+      if (!a.isMarketplace && b.isMarketplace) return 1;
+      return 0;
+    });
 
     return enriched;
   } catch (err) {

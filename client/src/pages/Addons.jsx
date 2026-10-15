@@ -2627,12 +2627,84 @@ export const Addons = () => {
                 );
               })()}
 
+              {/* Quick Search Preset Pills */}
+              <div className="wizard-presets-row">
+                <span className="text-xs text-sub font-semibold mr-1">Search presets:</span>
+                <button
+                  type="button"
+                  className="wizard-preset-pill"
+                  onClick={() => {
+                    const base = (urlWizardQueue[urlWizardIndex]?.displayName || urlWizardQueue[urlWizardIndex]?.name || '')
+                      .replace(/\.(mcaddon|mcpack|zip)$/i, '')
+                      .replace(/[\s\-_]*(addon|\(addon\)|pack|\(pack\)|behavior|resource|bp|rp)$/i, '')
+                      .trim();
+                    const q = `${base} minecraft marketplace`;
+                    setUrlWizardQuery(q);
+                    fetchUrlSearchResults(q, urlWizardQueue[urlWizardIndex]?.uuid);
+                  }}
+                  disabled={urlWizardSearching || urlWizardSaving || urlWizardAutoSearchingAll}
+                  title="Search Minecraft Marketplace PDPs"
+                >
+                  🏪 Marketplace
+                </button>
+                <button
+                  type="button"
+                  className="wizard-preset-pill"
+                  onClick={() => {
+                    const base = (urlWizardQueue[urlWizardIndex]?.displayName || urlWizardQueue[urlWizardIndex]?.name || '')
+                      .replace(/\.(mcaddon|mcpack|zip)$/i, '')
+                      .replace(/[\s\-_]*(addon|\(addon\)|pack|\(pack\)|behavior|resource|bp|rp)$/i, '')
+                      .trim();
+                    const q = `${base} curseforge bedrock`;
+                    setUrlWizardQuery(q);
+                    fetchUrlSearchResults(q, urlWizardQueue[urlWizardIndex]?.uuid);
+                  }}
+                  disabled={urlWizardSearching || urlWizardSaving || urlWizardAutoSearchingAll}
+                  title="Search CurseForge Bedrock"
+                >
+                  🔥 CurseForge
+                </button>
+                <button
+                  type="button"
+                  className="wizard-preset-pill"
+                  onClick={() => {
+                    const base = (urlWizardQueue[urlWizardIndex]?.displayName || urlWizardQueue[urlWizardIndex]?.name || '')
+                      .replace(/\.(mcaddon|mcpack|zip)$/i, '')
+                      .replace(/[\s\-_]*(addon|\(addon\)|pack|\(pack\)|behavior|resource|bp|rp)$/i, '')
+                      .trim();
+                    const q = `${base} mcpedl`;
+                    setUrlWizardQuery(q);
+                    fetchUrlSearchResults(q, urlWizardQueue[urlWizardIndex]?.uuid);
+                  }}
+                  disabled={urlWizardSearching || urlWizardSaving || urlWizardAutoSearchingAll}
+                  title="Search MCPEDL"
+                >
+                  📦 MCPEDL
+                </button>
+                <button
+                  type="button"
+                  className="wizard-preset-pill text-sub"
+                  onClick={() => {
+                    const base = (urlWizardQueue[urlWizardIndex]?.displayName || urlWizardQueue[urlWizardIndex]?.name || '')
+                      .replace(/\.(mcaddon|mcpack|zip)$/i, '')
+                      .replace(/[\s\-_]*(addon|\(addon\)|pack|\(pack\)|behavior|resource|bp|rp)$/i, '')
+                      .trim();
+                    setUrlWizardQuery(base);
+                    fetchUrlSearchResults(base, urlWizardQueue[urlWizardIndex]?.uuid);
+                  }}
+                  disabled={urlWizardSearching || urlWizardSaving || urlWizardAutoSearchingAll}
+                  title="Reset to pure pack name"
+                >
+                  ↺ Reset
+                </button>
+              </div>
+
               {/* Search Query Bar */}
               <div className="wizard-search-bar mb-3 d-flex gap-2">
                 <input
                   type="text"
                   className="input-modern flex-1"
-                  placeholder="Search addon name, creator, or keywords..."
+                  placeholder="Search pack name, marketplace URL, or creator..."
                   value={urlWizardQuery}
                   onChange={(e) => setUrlWizardQuery(e.target.value)}
                   onKeyDown={(e) => {
@@ -2680,7 +2752,7 @@ export const Addons = () => {
                   <div className="py-8 text-center border-dashed rounded">
                     <div className="spinner mb-2" />
                     <p className="text-sub text-sm m-0">
-                      Searching CurseForge, MCPEDL, Chunk, PlanetMinecraft, and the web...
+                      Searching Minecraft Marketplace, CurseForge, MCPEDL, Chunk, and the web...
                     </p>
                   </div>
                 ) : urlWizardResults.length === 0 ? (
@@ -2689,64 +2761,83 @@ export const Addons = () => {
                   </div>
                 ) : (
                   <div className="wizard-results-list d-flex flex-column gap-2" style={{ maxHeight: '280px', overflowY: 'auto' }}>
-                    {urlWizardResults.map((item, idx) => (
-                      <div key={item.url || idx} className="wizard-result-card p-3 rounded d-flex items-start gap-3">
-                        <div className="wizard-result-thumb-wrap flex-shrink-0">
-                          {item.image ? (
-                            <img
-                              src={item.image}
-                              alt=""
-                              className="wizard-result-thumb-img"
-                              onError={(e) => {
-                                e.target.style.display = 'none';
-                                const fallback = e.target.parentElement.querySelector('.wizard-result-thumb-fallback');
-                                if (fallback) fallback.style.display = 'flex';
-                              }}
-                            />
-                          ) : null}
-                          <div
-                            className="wizard-result-thumb-fallback"
-                            style={{ display: item.image ? 'none' : 'flex' }}
-                          >
-                            🌐
-                          </div>
-                        </div>
+                    {urlWizardResults.map((item, idx) => {
+                      const isOfficial = item.isOfficialMarketplace;
+                      const isMarket = item.isMarketplace;
+                      const cardClass = `wizard-result-card p-3 rounded d-flex items-start gap-3 ${
+                        isOfficial || isMarket ? 'marketplace-highlight' : ''
+                      }`;
 
-                        <div className="flex-1 min-w-0">
-                          <div className="d-flex items-center gap-2 mb-0.5">
-                            {item.siteName && (
-                              <span className="badge badge-system text-xs py-0 px-1 font-mono">
-                                {item.siteName}
-                              </span>
-                            )}
-                            <a
-                              href={item.url}
-                              target="_blank"
-                              rel="noreferrer noopener"
-                              className="wizard-result-link font-semibold text-white text-sm truncate flex-1 hover:underline"
-                              title={item.title}
+                      return (
+                        <div key={item.url || idx} className={cardClass}>
+                          <div className="wizard-result-thumb-wrap flex-shrink-0">
+                            {item.image ? (
+                              <img
+                                src={item.image}
+                                alt=""
+                                className="wizard-result-thumb-img"
+                                onError={(e) => {
+                                  e.target.style.display = 'none';
+                                  const fallback = e.target.parentElement.querySelector('.wizard-result-thumb-fallback');
+                                  if (fallback) fallback.style.display = 'flex';
+                                }}
+                              />
+                            ) : null}
+                            <div
+                              className="wizard-result-thumb-fallback"
+                              style={{ display: item.image ? 'none' : 'flex' }}
                             >
-                              {item.title} ↗
-                            </a>
+                              {isOfficial ? '🏪' : '🌐'}
+                            </div>
                           </div>
-                          <p className="wizard-result-snippet text-xs text-muted m-0">
-                            {item.snippet}
-                          </p>
-                          <span className="text-xs text-sub font-mono truncate d-block mt-0.5" style={{ opacity: 0.7 }}>
-                            {item.url}
-                          </span>
-                        </div>
 
-                        <button
-                          type="button"
-                          className="btn btn-primary btn-sm flex-shrink-0"
-                          onClick={() => handleAssignUrl(item.url)}
-                          disabled={urlWizardSaving || urlWizardAutoSearchingAll}
-                        >
-                          Select ✓
-                        </button>
-                      </div>
-                    ))}
+                          <div className="flex-1 min-w-0">
+                            <div className="d-flex items-center gap-2 mb-0.5 flex-wrap">
+                              {isOfficial ? (
+                                <span className="badge badge-official text-xs py-0 px-1 font-mono">
+                                  ⭐ Minecraft Marketplace (Official)
+                                </span>
+                              ) : isMarket ? (
+                                <span className="badge badge-marketplace text-xs py-0 px-1 font-mono">
+                                  🛒 {item.siteName || 'Marketplace'}
+                                </span>
+                              ) : item.siteName ? (
+                                <span className="badge badge-system text-xs py-0 px-1 font-mono">
+                                  {item.siteName}
+                                </span>
+                              ) : null}
+
+                              <a
+                                href={item.url}
+                                target="_blank"
+                                rel="noreferrer noopener"
+                                className="wizard-result-link font-semibold text-white text-sm truncate flex-1 hover:underline"
+                                title={item.title}
+                              >
+                                {item.title} ↗
+                              </a>
+                            </div>
+                            {item.snippet ? (
+                              <p className="wizard-result-snippet text-xs text-muted m-0">
+                                {item.snippet}
+                              </p>
+                            ) : null}
+                            <span className="text-xs text-sub font-mono truncate d-block mt-0.5" style={{ opacity: 0.7 }}>
+                              {item.url}
+                            </span>
+                          </div>
+
+                          <button
+                            type="button"
+                            className="btn btn-primary btn-sm flex-shrink-0"
+                            onClick={() => handleAssignUrl(item.url)}
+                            disabled={urlWizardSaving || urlWizardAutoSearchingAll}
+                          >
+                            Select ✓
+                          </button>
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
               </div>

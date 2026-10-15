@@ -1,6 +1,6 @@
 {
-  "commit": "9fa62d2",
-  "commitFull": "9fa62d27cabe79048ff7dd7805fd785125e6e6bd",
-  "date": "51 seconds ago",
-  "subject": "Update version.json with commit 4161857"
+  "commit": "f8d1fcb",
+  "commitFull": "f8d1fcb0b460a13bb3fd99bff0d17c6dfac546d7",
+  "date": "11 seconds ago",
+  "subject": "v1.2.1: Full stability pass, Xbox bot 1-click device link overhaul, cross-platform clipboard fix, and process kill management"
 }

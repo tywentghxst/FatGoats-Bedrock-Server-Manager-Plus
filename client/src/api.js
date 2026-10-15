@@ -156,6 +156,9 @@ export const Addons = {
   autoFix: (action, targetUuid) => request('POST', '/api/addons/autofix', { action, targetUuid }),
   bulkAction: (action, uuids = null, options = {}) =>
     request('POST', '/api/addons/bulk', { action, uuids, ...options }),
+  getSuggestions: () => request('GET', '/api/addons/suggestions'),
+  swapPackType: (uuid, swapPair = false) =>
+    request('POST', `/api/addons/${encodeURIComponent(uuid)}/swap`, { swapPair }),
 };
 
 export const Users = {

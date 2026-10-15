@@ -257,6 +257,56 @@ router.post('/autofix', authenticate, requireAdmin, (req, res) => {
 });
 
 /**
+ * GET /suggestions
+ * (authenticate) Analyze installed packs and server logs for pack placement/swap recommendations
+ */
+router.get('/suggestions', authenticate, (req, res) => {
+  try {
+    const report = addonService.getSwapSuggestions();
+    return res.json(report);
+  } catch (err) {
+    console.error('[AddonsRoute] Error fetching swap suggestions:', err);
+    return res.status(500).json({ error: 'Failed to generate swap suggestions', details: err.message });
+  }
+});
+
+/**
+ * POST /swap
+ * (authenticate, requireAdmin) Swap pack location between BP and RP (single or dual-pack pair)
+ */
+router.post('/swap', authenticate, requireAdmin, async (req, res) => {
+  try {
+    const { uuid, swapPair } = req.body;
+    if (!uuid) {
+      return res.status(400).json({ error: 'uuid is required' });
+    }
+    const result = await addonService.swapAddonPackType(uuid, { swapPair: Boolean(swapPair) });
+    logAudit(req.user.id, req.user.username, 'ADDON_SWAP_TYPE', { uuid, swapPair: Boolean(swapPair), swapped: result.swapped });
+    return res.json(result);
+  } catch (err) {
+    console.error('[AddonsRoute] Error swapping pack type:', err);
+    return res.status(400).json({ error: err.message || 'Failed to swap pack type' });
+  }
+});
+
+/**
+ * POST /:uuid/swap
+ * (authenticate, requireAdmin) Swap specific pack location between BP and RP
+ */
+router.post('/:uuid/swap', authenticate, requireAdmin, async (req, res) => {
+  try {
+    const { uuid } = req.params;
+    const swapPair = req.body?.swapPair === true;
+    const result = await addonService.swapAddonPackType(uuid, { swapPair });
+    logAudit(req.user.id, req.user.username, 'ADDON_SWAP_TYPE', { uuid, swapPair, swapped: result.swapped });
+    return res.json(result);
+  } catch (err) {
+    console.error('[AddonsRoute] Error swapping pack type:', err);
+    return res.status(400).json({ error: err.message || 'Failed to swap pack type' });
+  }
+});
+
+/**
  * POST /bulk
  * (authenticate, requireAdmin) Bulk operations (enable_all, disable_all, delete_all)
  */

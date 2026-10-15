@@ -108,21 +108,63 @@ export const Addons = () => {
   const [urlWizardSuccess, setUrlWizardSuccess] = useState(null);
   const [urlWizardAutoSearchingAll, setUrlWizardAutoSearchingAll] = useState(false);
 
-  // Diagnostics Engine state (Mode 3)
+  // Diagnostics Engine state
   const [diagnosticsReport, setDiagnosticsReport] = useState(null);
   const [loadingDiagnostics, setLoadingDiagnostics] = useState(false);
   const [geminiApiKey, setGeminiApiKey] = useState(() => localStorage.getItem('gemini_api_key') || '');
   const [showKeyInput, setShowKeyInput] = useState(false);
   const [autoFixingId, setAutoFixingId] = useState(null);
 
-  // Load all addons and active order from server
+  // Suggestions & Swaps state (Mode 3)
+  const [suggestions, setSuggestions] = useState([]);
+  const [loadingSuggestions, setLoadingSuggestions] = useState(false);
+  const [swappingUuid, setSwappingUuid] = useState(null);
+  const [swapConfirmModal, setSwapConfirmModal] = useState(null); // { addon, swapPair }
+
+  // Load swap suggestions from server
+  const loadSuggestions = useCallback(async () => {
+    setLoadingSuggestions(true);
+    try {
+      const res = await api.Addons.getSuggestions();
+      setSuggestions(res.suggestions || []);
+    } catch (err) {
+      console.warn('Failed to load swap suggestions:', err.message);
+    } finally {
+      setLoadingSuggestions(false);
+    }
+  }, []);
+
+  // Handle swapping pack location between BP and RP (single or dual-pack pair)
+  const handleSwapPack = async (addon, swapPair = false) => {
+    if (!addon || !isAdmin) return;
+    setSwappingUuid(addon.uuid);
+    setError(null);
+    try {
+      const res = await api.Addons.swapPackType(addon.uuid, swapPair);
+      setSuccessMsg(res.message || 'Pack type swapped successfully.');
+      setSwapConfirmModal(null);
+      if (editModalAddon && (editModalAddon.uuid === addon.uuid || (swapPair && editModalAddon.group_id === addon.group_id))) {
+        setEditModalAddon(null);
+      }
+      await loadData();
+      await loadSuggestions();
+    } catch (err) {
+      console.error('Error swapping pack type:', err);
+      setError(err.message || 'Failed to swap pack type.');
+    } finally {
+      setSwappingUuid(null);
+    }
+  };
+
+  // Load all addons, active order, and suggestions from server
   const loadData = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const [installedRes, activeRes] = await Promise.allSettled([
+      const [installedRes, activeRes, suggestionsRes] = await Promise.allSettled([
         api.Addons.list(),
         api.Addons.getActive(),
+        api.Addons.getSuggestions(),
       ]);
 
       if (installedRes.status === 'fulfilled') {
@@ -141,6 +183,10 @@ export const Addons = () => {
         }
         setActiveBP(activeData.behaviorPacks || []);
         setActiveRP(activeData.resourcePacks || []);
+      }
+
+      if (suggestionsRes.status === 'fulfilled') {
+        setSuggestions(suggestionsRes.value?.suggestions || []);
       }
     } catch (err) {
       console.error('Error fetching addons data:', err);
@@ -181,8 +227,10 @@ export const Addons = () => {
   useEffect(() => {
     if (engineMode === 'diagnostics' && !diagnosticsReport) {
       runDiagnostics();
+    } else if (engineMode === 'suggestions') {
+      loadSuggestions();
     }
-  }, [engineMode]);
+  }, [engineMode, diagnosticsReport, loadSuggestions]);
 
   // Disk sync / scan folders
   const handleScanFolders = async () => {
@@ -1017,11 +1065,29 @@ export const Addons = () => {
         </button>
         <button
           type="button"
+          className={`settings-tab-btn ${engineMode === 'suggestions' ? 'active' : ''}`}
+          onClick={() => {
+            setEngineMode('suggestions');
+            loadSuggestions();
+          }}
+        >
+          <span className="tab-icon">💡</span>
+          <span className="d-flex items-center gap-1.5">
+            <span>Mode 3: Suggestions &amp; Swaps</span>
+            {suggestions.length > 0 && (
+              <span className="badge badge-warning text-xs font-bold py-0.5 px-1.5">
+                {suggestions.length}
+              </span>
+            )}
+          </span>
+        </button>
+        <button
+          type="button"
           className={`settings-tab-btn ${engineMode === 'diagnostics' ? 'active' : ''}`}
           onClick={() => setEngineMode('diagnostics')}
         >
           <span className="tab-icon">🩺</span>
-          <span>Mode 3: AI Diagnostics Engine</span>
+          <span>Mode 4: AI Diagnostics Engine</span>
         </button>
       </div>
 
@@ -1368,8 +1434,13 @@ export const Addons = () => {
                     </div>
 
                     {/* Card Title & Version */}
-                    <div className="addon-title-strip mb-2">
-                      <h3 className="addon-main-title" title={getCleanPackName(addon)}>
+                    <div
+                      className="addon-title-strip mb-2"
+                      onClick={() => openEditModal(addon)}
+                      style={{ cursor: 'pointer' }}
+                      title="Click to view details and swap pack location"
+                    >
+                      <h3 className="addon-main-title">
                         {getCleanPackName(addon)}
                       </h3>
                       <div className="d-flex items-center gap-2 text-xs text-sub mt-0.5">
@@ -1449,6 +1520,26 @@ export const Addons = () => {
                           title="Edit metadata & settings (Pencil)"
                         >
                           ✏️
+                        </button>
+                      )}
+
+                      {/* Swap Pack Type (BP ⇄ RP) */}
+                      {isAdmin && !addon.is_system && (
+                        <button
+                          type="button"
+                          className="btn-icon-modern"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setSwapConfirmModal({ addon, swapPair: hasCompanion });
+                          }}
+                          disabled={swappingUuid === addon.uuid}
+                          title={
+                            hasCompanion
+                              ? 'Swap dual-pack locations (Invert BP ⇄ RP)'
+                              : `Swap to ${addon.type === 'behavior' ? 'Resource Pack' : 'Behavior Pack'} (BP ⇄ RP)`
+                          }
+                        >
+                          {swappingUuid === addon.uuid ? '⏳' : '🔄'}
                         </button>
                       )}
 
@@ -1877,7 +1968,207 @@ export const Addons = () => {
       )}
 
       {/* =========================================================================
-          MODE 3: AI DIAGNOSTICS ENGINE
+          MODE 3: SUGGESTIONS & SWAPS
+          ========================================================================= */}
+      {engineMode === 'suggestions' && (
+        <div className="engine-mode-content">
+          {/* Suggestions Toolbar & Information Banner */}
+          <div className="modern-card p-4 mb-4">
+            <div className="d-flex justify-between items-center flex-wrap gap-3">
+              <div>
+                <h2 className="text-lg font-bold text-white d-flex items-center gap-2 m-0">
+                  <span>💡</span>
+                  <span>Smart Pack Suggestions &amp; Location Swapper</span>
+                </h2>
+                <p className="text-xs text-sub mt-1 mb-0">
+                  Detects add-ons showing errors during server execution, mislabeled pack manifests, and inverted behavior/resource pack directories.
+                </p>
+              </div>
+              <button
+                type="button"
+                className="btn btn-secondary d-flex items-center gap-1.5"
+                onClick={loadSuggestions}
+                disabled={loadingSuggestions}
+              >
+                <span>{loadingSuggestions ? '⏳' : '🔄'}</span>
+                <span>{loadingSuggestions ? 'Scanning...' : 'Re-Scan Packs & Server Logs'}</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Active Suggestions List */}
+          {loadingSuggestions ? (
+            <div className="modern-card p-5 text-center text-sub mb-4">
+              <div className="loading-spinner mb-2">⏳</div>
+              <p className="m-0">Analyzing pack manifests, directory contents, and server console logs...</p>
+            </div>
+          ) : suggestions.length > 0 ? (
+            <div className="d-flex flex-column gap-3 mb-5">
+              {suggestions.map((sug) => {
+                const isDual = Boolean(sug.isDualPack);
+                return (
+                  <div key={sug.id} className="modern-card p-4 border border-warning">
+                    <div className="d-flex justify-between items-start flex-wrap gap-2 mb-2">
+                      <div>
+                        <div className="d-flex items-center gap-2">
+                          <span className={`badge ${sug.severity === 'critical' ? 'badge-danger' : 'badge-warning'} font-bold uppercase`}>
+                            {sug.severity}
+                          </span>
+                          <h4 className="text-white font-bold m-0 text-base">{sug.title}</h4>
+                        </div>
+                        <p className="text-xs text-sub mt-1 mb-0">{sug.reason}</p>
+                      </div>
+                      <div className="d-flex items-center gap-2">
+                        <span className="badge badge-behavior">
+                          From: {sug.currentType === 'behavior' ? 'behavior_packs/' : 'resource_packs/'}
+                        </span>
+                        <span className="text-white text-xs">➔</span>
+                        <span className="badge badge-resource font-bold">
+                          To: {sug.suggestedType === 'resource' ? 'resource_packs/' : 'behavior_packs/'}
+                        </span>
+                      </div>
+                    </div>
+
+                    {sug.details && (
+                      <div className="p-2.5 bg-darker rounded text-xs text-sub mb-3 font-mono">
+                        {sug.details}
+                      </div>
+                    )}
+
+                    {sug.serverErrors && sug.serverErrors.length > 0 && (
+                      <div className="mb-3 p-2.5 bg-black rounded border border-danger">
+                        <span className="text-xs text-danger font-bold d-block mb-1">
+                          ⚠️ BDS Console Log Error(s) Captured for this Pack:
+                        </span>
+                        {sug.serverErrors.map((errLine, eIdx) => (
+                          <div key={eIdx} className="font-mono text-xs text-danger truncate" title={errLine}>
+                            {errLine}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    <div className="d-flex justify-end items-center gap-2 mt-2">
+                      {isDual && (
+                        <button
+                          type="button"
+                          className="btn btn-primary d-flex items-center gap-1.5 font-bold"
+                          onClick={() => handleSwapPack({ uuid: sug.uuid, name: sug.packName, group_id: true }, true)}
+                          disabled={swappingUuid === sug.uuid}
+                        >
+                          <span>🔀</span>
+                          <span>Swap Both Packs (Invert BP ⇄ RP)</span>
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        className="btn btn-warning d-flex items-center gap-1.5 font-bold"
+                        onClick={() => handleSwapPack({ uuid: sug.uuid, name: sug.packName }, false)}
+                        disabled={swappingUuid === sug.uuid}
+                      >
+                        <span>🔄</span>
+                        <span>Swap Only This Pack Location</span>
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="modern-card p-5 text-center mb-5 border border-success">
+              <span className="text-3xl mb-2 d-block">✅</span>
+              <h3 className="text-white font-bold mb-1">All Addon Locations Verified</h3>
+              <p className="text-xs text-sub max-w-lg mx-auto mb-3">
+                No directory mismatches, reversed dual-pack companions, or runtime pack stack errors were found across your installed packs.
+              </p>
+            </div>
+          )}
+
+          {/* Manual Pack Location Switcher Quick-Table */}
+          <div className="modern-card p-4">
+            <h3 className="text-base font-bold text-white mb-2 d-flex items-center gap-2">
+              <span>🔧</span>
+              <span>Manual Pack Location Switcher</span>
+            </h3>
+            <p className="text-xs text-sub mb-3">
+              Need to swap an add-on manually? If any imported pack isn't behaving properly, you can move it between <code>behavior_packs/</code> and <code>resource_packs/</code> here with one click:
+            </p>
+
+            <div className="table-responsive">
+              <table className="table-modern w-100">
+                <thead>
+                  <tr>
+                    <th>Pack Name</th>
+                    <th>Current Location</th>
+                    <th>Dual-Pack</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {addonsList.filter(a => !a.is_system).map((addon) => {
+                    const hasComp = Boolean(addon.group_id);
+                    const isBP = addon.type === 'behavior';
+                    return (
+                      <tr key={addon.uuid}>
+                        <td>
+                          <div className="d-flex items-center gap-2">
+                            <span className="text-base">{isBP ? '⚙️' : '🎨'}</span>
+                            <div>
+                              <div className="text-white font-bold text-xs">{addon.display_name || addon.name}</div>
+                              <div className="text-muted font-mono text-xs">{addon.uuid.substring(0, 8)}...</div>
+                            </div>
+                          </div>
+                        </td>
+                        <td>
+                          <span className={`badge ${isBP ? 'badge-behavior' : 'badge-resource'}`}>
+                            {isBP ? 'behavior_packs/ (BP)' : 'resource_packs/ (RP)'}
+                          </span>
+                        </td>
+                        <td>
+                          {hasComp ? (
+                            <span className="badge badge-dual-pack">🔗 Dual-Pack</span>
+                          ) : (
+                            <span className="text-sub text-xs">Standalone</span>
+                          )}
+                        </td>
+                        <td>
+                          <div className="d-flex gap-2">
+                            <button
+                              type="button"
+                              className="btn btn-secondary btn-xs d-flex items-center gap-1"
+                              onClick={() => handleSwapPack(addon, false)}
+                              disabled={swappingUuid === addon.uuid}
+                              title={`Move to ${isBP ? 'resource_packs/' : 'behavior_packs/'}`}
+                            >
+                              <span>🔄</span>
+                              <span>Move to {isBP ? 'Resource' : 'Behavior'}</span>
+                            </button>
+                            {hasComp && (
+                              <button
+                                type="button"
+                                className="btn btn-secondary btn-xs d-flex items-center gap-1 text-emerald"
+                                onClick={() => handleSwapPack(addon, true)}
+                                disabled={swappingUuid === addon.uuid}
+                                title="Invert both packs in this dual-pack pair"
+                              >
+                                <span>🔀</span>
+                                <span>Invert Pair</span>
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* =========================================================================
+          MODE 4: AI DIAGNOSTICS ENGINE
           ========================================================================= */}
       {engineMode === 'diagnostics' && (
         <div className="engine-mode-content">
@@ -2123,6 +2414,52 @@ export const Addons = () => {
                     Switching categories automatically moves physical files on disk between <code>behavior_packs/</code> and <code>resource_packs/</code>.
                   </small>
                 </div>
+
+                {!editModalAddon.is_system && (
+                  <div className="form-group-modern mb-4 p-3 bg-darker rounded border border-warning">
+                    <div className="d-flex justify-between items-center mb-1 flex-wrap gap-1">
+                      <span className="field-label-bold m-0 text-warning font-bold text-xs d-flex items-center gap-1">
+                        <span>🔄</span>
+                        <span>Swap Pack Location (BP ⇄ RP)</span>
+                      </span>
+                      <span className={`badge ${editModalAddon.type === 'behavior' ? 'badge-behavior' : 'badge-resource'} text-xs`}>
+                        Currently: {editModalAddon.type === 'behavior' ? 'Behavior (BP)' : 'Resource (RP)'}
+                      </span>
+                    </div>
+                    <p className="text-xs text-sub mb-3">
+                      If this pack was imported into the wrong directory or textures/behaviors aren't showing in-game, you can swap its location:
+                    </p>
+                    <div className="d-flex gap-2 flex-wrap">
+                      <button
+                        type="button"
+                        className="btn btn-warning btn-sm d-flex items-center gap-1.5 font-bold"
+                        onClick={() => handleSwapPack(editModalAddon, false)}
+                        disabled={swappingUuid === editModalAddon.uuid}
+                        title={`Move from ${editModalAddon.type === 'behavior' ? 'behavior_packs' : 'resource_packs'} to ${editModalAddon.type === 'behavior' ? 'resource_packs' : 'behavior_packs'}`}
+                      >
+                        <span>{swappingUuid === editModalAddon.uuid ? '⏳' : '🔄'}</span>
+                        <span>
+                          {swappingUuid === editModalAddon.uuid
+                            ? 'Swapping...'
+                            : `Swap to ${editModalAddon.type === 'behavior' ? 'Resource Pack (resource_packs/)' : 'Behavior Pack (behavior_packs/)'}`}
+                        </span>
+                      </button>
+
+                      {editModalAddon.group_id && (
+                        <button
+                          type="button"
+                          className="btn btn-secondary btn-sm d-flex items-center gap-1.5 font-bold text-emerald"
+                          onClick={() => handleSwapPack(editModalAddon, true)}
+                          disabled={swappingUuid === editModalAddon.uuid}
+                          title="Invert both packs in this dual-pack companion pair"
+                        >
+                          <span>🔀</span>
+                          <span>Invert Dual-Pack Pair Roles (BP ⇄ RP)</span>
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
 
                 <div className="form-group-modern mb-4">
                   <label className="field-label-bold">Addon Description / Notes:</label>
@@ -2888,6 +3225,77 @@ export const Addons = () => {
                   disabled={urlWizardSaving || urlWizardAutoSearchingAll}
                 >
                   {urlWizardIndex < urlWizardQueue.length - 1 ? 'Skip This Pack' : 'Close'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* =========================================================================
+          MODAL: SWAP PACK LOCATION CONFIRMATION (BP <-> RP)
+          ========================================================================= */}
+      {swapConfirmModal && (
+        <div className="modal-overlay" onClick={() => !swappingUuid && setSwapConfirmModal(null)}>
+          <div className="modal modal-md" onClick={(e) => e.stopPropagation()} role="dialog">
+            <div className="modal-header">
+              <h3 className="modal-title">🔄 Swap Pack Location (BP ⇄ RP)</h3>
+              <button
+                type="button"
+                className="modal-close-btn"
+                onClick={() => !swappingUuid && setSwapConfirmModal(null)}
+              >
+                ✕
+              </button>
+            </div>
+            <div className="modal-body p-4">
+              <p className="text-white text-sm mb-3">
+                You are swapping the storage directory and engine type for <strong>{swapConfirmModal.addon.display_name || swapConfirmModal.addon.name}</strong>.
+              </p>
+              <div className="p-3 bg-darker rounded mb-3 text-xs">
+                <div>
+                  <strong>Current Location:</strong> <code>{swapConfirmModal.addon.type === 'behavior' ? 'behavior_packs/' : 'resource_packs/'}</code> ({swapConfirmModal.addon.type === 'behavior' ? 'Behavior Pack' : 'Resource Pack'})
+                </div>
+                <div className="mt-1 text-emerald">
+                  <strong>New Target Location:</strong> <code>{swapConfirmModal.addon.type === 'behavior' ? 'resource_packs/' : 'behavior_packs/'}</code> ({swapConfirmModal.addon.type === 'behavior' ? 'Resource Pack' : 'Behavior Pack'})
+                </div>
+              </div>
+              {swapConfirmModal.addon.group_id && (
+                <div className="alert alert-info text-xs mb-3">
+                  🔗 <strong>Dual-Pack Companion Detected:</strong> This addon has a paired companion pack. You can invert both packs simultaneously so their roles swap cleanly.
+                </div>
+              )}
+              <p className="text-xs text-sub mb-0">
+                This moves the folder on disk, updates manifest module types, and updates the active world load order automatically.
+              </p>
+            </div>
+            <div className="modal-footer d-flex justify-between items-center gap-2">
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => setSwapConfirmModal(null)}
+                disabled={Boolean(swappingUuid)}
+              >
+                Cancel
+              </button>
+              <div className="d-flex gap-2">
+                {swapConfirmModal.addon.group_id && (
+                  <button
+                    type="button"
+                    className="btn btn-secondary text-emerald font-bold"
+                    onClick={() => handleSwapPack(swapConfirmModal.addon, true)}
+                    disabled={Boolean(swappingUuid)}
+                  >
+                    {swappingUuid ? '⏳ Swapping...' : '🔀 Invert Dual-Pack Roles'}
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="btn btn-warning font-bold"
+                  onClick={() => handleSwapPack(swapConfirmModal.addon, false)}
+                  disabled={Boolean(swappingUuid)}
+                >
+                  {swappingUuid ? '⏳ Swapping...' : '🔄 Swap Pack Location'}
                 </button>
               </div>
             </div>

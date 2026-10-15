@@ -1149,6 +1149,14 @@ function executeAutoFix(action, targetUuid) {
     };
   }
 
+  if (action === 'swap_pack_type') {
+    return swapAddonPackType(targetUuid, { swapPair: false });
+  }
+
+  if (action === 'swap_dual_pack' || action === 'swap_pair') {
+    return swapAddonPackType(targetUuid, { swapPair: true });
+  }
+
   throw new Error(`Unknown auto-fix action: ${action}`);
 }
 
@@ -1463,6 +1471,344 @@ async function searchAddonUrl(query) {
   }
 }
 
+/**
+ * Analyze installed custom addons and active server logs to detect:
+ * 1. Mislabeled packs: Resource pack modules/assets placed in behavior_packs/
+ * 2. Mislabeled packs: Behavior pack modules/logic placed in resource_packs/
+ * 3. Inverted dual-pack pairs: BP and RP swapped on import
+ * 4. Runtime errors reported by BDS matching pack stack / UUID / names
+ */
+function getSwapSuggestions() {
+  const worldName = getActiveWorldName();
+  const active = getActiveAddons(worldName);
+  const allAddons = listAddons();
+  const customAddons = allAddons.filter(a => !a.is_system);
+
+  let consoleLogs = [];
+  try {
+    const serverProcess = require('./serverProcess');
+    if (serverProcess && typeof serverProcess.getConsoleLogs === 'function') {
+      consoleLogs = serverProcess.getConsoleLogs() || [];
+    }
+  } catch (_) {}
+
+  const suggestions = [];
+  const processedPairGroups = new Set();
+
+  // Resource-specific and behavior-specific directories
+  const resourceFolders = new Set(['textures', 'sounds', 'attachables', 'models', 'particles', 'render_controllers', 'animations', 'fogs', 'materials', 'ui', 'font', 'block_culling']);
+  const behaviorFolders = new Set(['entities', 'scripts', 'loot_tables', 'recipes', 'spawn_rules', 'trading', 'items', 'blocks', 'feature_rules', 'features', 'structures', 'functions', 'dialogue']);
+
+  function inspectPack(pack) {
+    if (!pack.path || !fs.existsSync(pack.path)) {
+      return { exists: false, resCount: 0, behCount: 0, moduleTypes: [], manifest: null };
+    }
+    let entries = [];
+    try {
+      entries = fs.readdirSync(pack.path, { withFileTypes: true });
+    } catch (_) {}
+
+    let resCount = 0;
+    let behCount = 0;
+    for (const ent of entries) {
+      const lower = ent.name.toLowerCase();
+      if (resourceFolders.has(lower)) resCount++;
+      if (behaviorFolders.has(lower)) behCount++;
+    }
+
+    let manifest = null;
+    let moduleTypes = [];
+    const mfPath = path.join(pack.path, 'manifest.json');
+    if (fs.existsSync(mfPath)) {
+      try {
+        manifest = JSON.parse(fs.readFileSync(mfPath, 'utf8'));
+        if (Array.isArray(manifest.modules)) {
+          moduleTypes = manifest.modules.map(m => (m.type || '').toLowerCase());
+        }
+      } catch (_) {}
+    }
+
+    return { exists: true, resCount, behCount, moduleTypes, manifest };
+  }
+
+  // 1. Dual-Pack Pair Analysis
+  const groupMap = new Map();
+  for (const addon of customAddons) {
+    if (addon.group_id) {
+      if (!groupMap.has(addon.group_id)) groupMap.set(addon.group_id, []);
+      groupMap.get(addon.group_id).push(addon);
+    }
+  }
+
+  for (const [groupId, packs] of groupMap.entries()) {
+    if (packs.length === 2) {
+      const bp = packs.find(p => p.type === 'behavior');
+      const rp = packs.find(p => p.type === 'resource');
+
+      if (bp && rp) {
+        const bpInspect = inspectPack(bp);
+        const rpInspect = inspectPack(rp);
+
+        const bpHasResModules = bpInspect.moduleTypes.includes('resources') && !bpInspect.moduleTypes.includes('data') && !bpInspect.moduleTypes.includes('script');
+        const rpHasDataModules = (rpInspect.moduleTypes.includes('data') || rpInspect.moduleTypes.includes('script')) && !rpInspect.moduleTypes.includes('resources');
+
+        const bpLooksLikeRP = bpHasResModules || (bpInspect.resCount > 0 && bpInspect.behCount === 0);
+        const rpLooksLikeBP = rpHasDataModules || (rpInspect.behCount > 0 && rpInspect.resCount === 0);
+
+        if (bpLooksLikeRP && rpLooksLikeBP) {
+          processedPairGroups.add(groupId);
+          suggestions.push({
+            id: `swap_pair_${groupId}`,
+            type: 'inverted_dual_pack',
+            severity: 'critical',
+            title: `Inverted Dual-Pack: "${bp.display_name || bp.name}"`,
+            packName: bp.display_name || bp.name,
+            uuid: bp.uuid,
+            companionUuid: rp.uuid,
+            companionName: rp.display_name || rp.name,
+            isDualPack: true,
+            currentType: 'behavior',
+            suggestedType: 'resource',
+            reason: 'Dual-pack pair roles are reversed. The pack in behavior_packs contains textures/models, while the pack in resource_packs contains server logic.',
+            details: `BP folder (${bp.uuid.slice(0, 8)}) has resource assets; RP folder (${rp.uuid.slice(0, 8)}) has behavior logic.`,
+            action: 'swap_pair'
+          });
+        }
+      }
+    }
+  }
+
+  // 2. Individual Pack Analysis (for packs not already flagged as an inverted pair)
+  for (const addon of customAddons) {
+    if (addon.group_id && processedPairGroups.has(addon.group_id)) {
+      continue;
+    }
+
+    const info = inspectPack(addon);
+    if (!info.exists) continue;
+
+    // Check recent BDS server error logs mentioning this pack
+    const serverErrors = [];
+    const searchTerms = [addon.uuid, addon.name, addon.display_name].filter(Boolean);
+    for (const line of consoleLogs) {
+      const lower = line.toLowerCase();
+      const isErr = lower.includes('error') || lower.includes('fail') || lower.includes('warn') || lower.includes('exception') || lower.includes('pack stack') || lower.includes('jigsaw');
+      if (isErr && searchTerms.some(term => lower.includes(term.toLowerCase()))) {
+        serverErrors.push(line.trim());
+      }
+    }
+
+    // Heuristic 1: BP placed in behavior_packs but strictly a Resource Pack
+    if (addon.type === 'behavior') {
+      const isResModule = info.moduleTypes.includes('resources') && !info.moduleTypes.includes('data') && !info.moduleTypes.includes('script');
+      const onlyResAssets = info.resCount > 0 && info.behCount === 0;
+
+      if (isResModule || onlyResAssets || serverErrors.length > 0) {
+        suggestions.push({
+          id: `swap_single_${addon.uuid}`,
+          type: serverErrors.length > 0 ? 'runtime_pack_error' : 'mislabeled_behavior_pack',
+          severity: serverErrors.length > 0 ? 'high' : 'medium',
+          title: `Mislabeled Pack: "${addon.display_name || addon.name}" in Behavior Packs`,
+          packName: addon.display_name || addon.name,
+          uuid: addon.uuid,
+          isDualPack: Boolean(addon.group_id),
+          companionUuid: addon.group_id ? (allAddons.find(a => a.group_id === addon.group_id && a.uuid !== addon.uuid)?.uuid || null) : null,
+          currentType: 'behavior',
+          suggestedType: 'resource',
+          reason: isResModule
+            ? 'Manifest declares module type "resources" but the pack is located in behavior_packs.'
+            : onlyResAssets
+            ? 'Pack folder contains client textures/models with no server behavior files.'
+            : 'Server reported errors or warnings for this pack during execution.',
+          details: serverErrors.length > 0 ? `Captured ${serverErrors.length} server log notice(s).` : `Found ${info.resCount} resource folders and 0 behavior folders.`,
+          serverErrors: serverErrors.slice(-5),
+          action: 'swap_type'
+        });
+        continue;
+      }
+    }
+
+    // Heuristic 2: RP placed in resource_packs but strictly a Behavior Pack
+    if (addon.type === 'resource') {
+      const isDataModule = (info.moduleTypes.includes('data') || info.moduleTypes.includes('script')) && !info.moduleTypes.includes('resources');
+      const onlyBehAssets = info.behCount > 0 && info.resCount === 0;
+
+      if (isDataModule || onlyBehAssets || serverErrors.length > 0) {
+        suggestions.push({
+          id: `swap_single_${addon.uuid}`,
+          type: serverErrors.length > 0 ? 'runtime_pack_error' : 'mislabeled_resource_pack',
+          severity: serverErrors.length > 0 ? 'high' : 'medium',
+          title: `Mislabeled Pack: "${addon.display_name || addon.name}" in Resource Packs`,
+          packName: addon.display_name || addon.name,
+          uuid: addon.uuid,
+          isDualPack: Boolean(addon.group_id),
+          companionUuid: addon.group_id ? (allAddons.find(a => a.group_id === addon.group_id && a.uuid !== addon.uuid)?.uuid || null) : null,
+          currentType: 'resource',
+          suggestedType: 'behavior',
+          reason: isDataModule
+            ? 'Manifest declares module type "data" or "script" but the pack is located in resource_packs.'
+            : onlyBehAssets
+            ? 'Pack folder contains server behavior/entities/scripts with no client resource assets.'
+            : 'Server reported errors or warnings for this pack during execution.',
+          details: serverErrors.length > 0 ? `Captured ${serverErrors.length} server log notice(s).` : `Found ${info.behCount} behavior folders and 0 resource folders.`,
+          serverErrors: serverErrors.slice(-5),
+          action: 'swap_type'
+        });
+      }
+    }
+  }
+
+  return {
+    suggestions,
+    totalPacksChecked: customAddons.length,
+    activeWorld: worldName
+  };
+}
+
+/**
+ * Swap pack location and type between behavior_packs and resource_packs.
+ * If options.swapPair is true and pack has a companion, swaps both in the pair (inverts roles).
+ */
+async function swapAddonPackType(uuid, options = {}) {
+  const addon = db.prepare('SELECT * FROM addons WHERE uuid = ?').get(uuid);
+  if (!addon) {
+    throw new Error(`Addon with UUID "${uuid}" was not found.`);
+  }
+
+  const worldName = getActiveWorldName();
+  const active = getActiveAddons(worldName);
+  let activeBP = [...active.behaviorPacks];
+  let activeRP = [...active.resourcePacks];
+
+  const swapped = [];
+
+  function moveAndReclassify(pack, targetType) {
+    const targetSubdir = targetType === 'resource' ? 'resource_packs' : 'behavior_packs';
+    const targetDir = path.join(config.BDS_DIR, targetSubdir, pack.uuid);
+    const sourceDir = pack.path;
+
+    if (fs.existsSync(sourceDir)) {
+      ensureDir(path.dirname(targetDir));
+      if (fs.existsSync(targetDir) && path.resolve(sourceDir).toLowerCase() !== path.resolve(targetDir).toLowerCase()) {
+        try { fs.rmSync(targetDir, { recursive: true, force: true }); } catch (_) {}
+      }
+      if (path.resolve(sourceDir).toLowerCase() !== path.resolve(targetDir).toLowerCase()) {
+        try {
+          fs.renameSync(sourceDir, targetDir);
+        } catch (renameErr) {
+          copyDirRecursive(sourceDir, targetDir);
+          try { fs.rmSync(sourceDir, { recursive: true, force: true }); } catch (_) {}
+        }
+      }
+    }
+
+    // Update manifest.json module types if appropriate
+    const manifestPath = path.join(targetDir, 'manifest.json');
+    if (fs.existsSync(manifestPath)) {
+      try {
+        const raw = fs.readFileSync(manifestPath, 'utf8');
+        const manifest = JSON.parse(raw);
+        if (Array.isArray(manifest.modules) && manifest.modules.length > 0) {
+          if (targetType === 'resource') {
+            manifest.modules.forEach(m => {
+              if (m.type === 'data' || m.type === 'client_data') {
+                m.type = 'resources';
+              }
+            });
+          } else {
+            manifest.modules.forEach(m => {
+              if (m.type === 'resources') {
+                m.type = 'data';
+              }
+            });
+          }
+          atomicWriteJson(manifestPath, manifest);
+        }
+      } catch (mfErr) {
+        console.warn(`[AddonService] Notice adjusting manifest modules for ${pack.uuid}:`, mfErr.message);
+      }
+    }
+
+    // Update DB record
+    db.prepare(`
+      UPDATE addons
+      SET type = ?, path = ?
+      WHERE uuid = ?
+    `).run(targetType, targetDir, pack.uuid);
+
+    // Update active load orders in memory
+    const wasInBP = activeBP.some(p => p.uuid === pack.uuid);
+    const wasInRP = activeRP.some(p => p.uuid === pack.uuid);
+
+    activeBP = activeBP.filter(p => p.uuid !== pack.uuid);
+    activeRP = activeRP.filter(p => p.uuid !== pack.uuid);
+
+    const versionArr = typeof pack.version === 'string'
+      ? pack.version.split('.').map(n => parseInt(n, 10) || 0)
+      : (Array.isArray(pack.version) ? pack.version : [1, 0, 0]);
+
+    if (wasInBP || wasInRP) {
+      if (targetType === 'resource') {
+        activeRP.push({ uuid: pack.uuid, version: versionArr, name: pack.name });
+      } else {
+        activeBP.push({ uuid: pack.uuid, version: versionArr, name: pack.name });
+      }
+    }
+
+    swapped.push({
+      uuid: pack.uuid,
+      name: pack.display_name || pack.name,
+      oldType: pack.type,
+      newType: targetType,
+      newPath: targetDir
+    });
+  }
+
+  const companion = (addon.group_id && options.swapPair)
+    ? db.prepare('SELECT * FROM addons WHERE group_id = ? AND uuid != ?').get(addon.group_id, uuid)
+    : null;
+
+  if (companion && options.swapPair) {
+    const addonTargetType = addon.type === 'behavior' ? 'resource' : 'behavior';
+    const companionTargetType = companion.type === 'behavior' ? 'resource' : 'behavior';
+
+    // Temporary relocation to prevent directory collision
+    const tempSwapDir = path.join(config.BDS_DIR, `temp-swap-${Date.now()}`);
+    ensureDir(tempSwapDir);
+
+    const tempAddonDir = path.join(tempSwapDir, addon.uuid);
+    if (fs.existsSync(addon.path)) {
+      try {
+        fs.renameSync(addon.path, tempAddonDir);
+        addon.path = tempAddonDir;
+      } catch (_) {
+        copyDirRecursive(addon.path, tempAddonDir);
+        try { fs.rmSync(addon.path, { recursive: true, force: true }); } catch (_) {}
+        addon.path = tempAddonDir;
+      }
+    }
+
+    moveAndReclassify(companion, companionTargetType);
+    moveAndReclassify(addon, addonTargetType);
+
+    try { fs.rmSync(tempSwapDir, { recursive: true, force: true }); } catch (_) {}
+  } else {
+    const targetType = addon.type === 'behavior' ? 'resource' : 'behavior';
+    moveAndReclassify(addon, targetType);
+  }
+
+  // Persist updated world load order configs
+  setActiveAddons(worldName, activeBP, activeRP);
+
+  return {
+    success: true,
+    message: swapped.length > 1
+      ? `Successfully swapped dual-pack pair between Behavior and Resource pack locations.`
+      : `Successfully swapped "${addon.display_name || addon.name}" to ${swapped[0].newType === 'resource' ? 'Resource Pack' : 'Behavior Pack'}.`,
+    swapped
+  };
+}
+
 module.exports = {
   processAddonUpload,
   getPackIconPath,
@@ -1475,6 +1821,8 @@ module.exports = {
   runDiagnostics,
   executeAutoFix,
   executeBulk,
-  searchAddonUrl
+  searchAddonUrl,
+  getSwapSuggestions,
+  swapAddonPackType
 };
 

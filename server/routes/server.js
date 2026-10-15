@@ -57,6 +57,22 @@ router.post('/stop', requireOperatorOrAdmin, async (req, res) => {
 });
 
 /**
+ * POST /kill
+ * Require admin or operator, immediately force-kill the server process, logAudit
+ */
+router.post('/kill', requireOperatorOrAdmin, async (req, res) => {
+  try {
+    const result = await serverProcess.kill();
+    logAudit(req.user.id, req.user.username, 'SERVER_KILL', 'Server force-kill requested');
+    return res.json(result);
+  } catch (err) {
+    console.error('[ServerRoute] Error killing server:', err);
+    logAudit(req.user.id, req.user.username, 'SERVER_KILL_FAILED', err.message);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+/**
  * POST /restart
  * Require admin or operator, restart the server process, logAudit
  */

@@ -164,6 +164,8 @@ function parseLangFile(packDir) {
   return result;
 }
 
+const UUID_FOLDER_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 /**
  * Detect if a pack is an internal Mojang/BDS engine system addon (shipped with the server)
  */
@@ -172,8 +174,13 @@ function isSystemPack(folderOrName, manifestName = '', packPath = '') {
   const n = (manifestName || '').toLowerCase();
   const orig = (folderOrName || '').toLowerCase();
 
+  // If the folder is named as a UUID, it was installed by the user/manager and is NEVER a vanilla system pack
+  if (UUID_FOLDER_REGEX.test(f)) {
+    return false;
+  }
+
   // If it was uploaded from an addon archive, it is never a vanilla system pack
-  if (orig.endsWith('.mcaddon') || orig.endsWith('.mcpack')) {
+  if (orig.endsWith('.mcaddon') || orig.endsWith('.mcpack') || orig.endsWith('.zip')) {
     return false;
   }
 
@@ -193,8 +200,7 @@ function isSystemPack(folderOrName, manifestName = '', packPath = '') {
     n.startsWith('resourcepack.editor') ||
     n.startsWith('resourcepack.vanilla') ||
     n.startsWith('resourcepack.experimental') ||
-    n.startsWith('behaviorpack.vanilla') ||
-    n.startsWith('@minecraft/')
+    n.startsWith('behaviorpack.vanilla')
   );
 }
 

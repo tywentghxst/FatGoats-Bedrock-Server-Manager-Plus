@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import api from '../api';
 import { useAuth } from '../context/AuthContext';
+import { safeCopyToClipboard } from '../utils/clipboard';
 
 export function getCleanPackName(addon) {
   if (!addon) return 'Bedrock Add-On';
@@ -1215,8 +1216,8 @@ export const Addons = () => {
                         <span
                           className="font-mono text-white text-xs clickable-copy"
                           title="Click to copy UUID"
-                          onClick={() => {
-                            navigator.clipboard.writeText(addon.uuid);
+                          onClick={async () => {
+                            await safeCopyToClipboard(addon.uuid);
                             setSuccessMsg(`Copied UUID "${addon.uuid}" to clipboard!`);
                           }}
                         >

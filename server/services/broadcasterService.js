@@ -177,7 +177,7 @@ class BroadcasterService {
 # Managed automatically by Bedrock Server Manager
 session:
   update-interval: 30
-  query-server: true
+  query-server: false
   web-query-fallback: false
   config-fallback: true
   session-info:

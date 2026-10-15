@@ -211,13 +211,21 @@ function getPlayers(activeServerProcess = null) {
     all = db.prepare('SELECT * FROM players ORDER BY is_online DESC, last_seen DESC').all();
 
     // Map active connected players from serverProcess if provided
-    const connectedSet = activeServerProcess?.connectedPlayers || new Set();
+    const isServerRunning = activeServerProcess ? (activeServerProcess.state === 'running') : false;
+    const connectedSet = isServerRunning ? (activeServerProcess.connectedPlayers || new Set()) : new Set();
+
+    // If server is stopped, clear any stale is_online flags in SQLite
+    if (activeServerProcess && !isServerRunning) {
+      try {
+        db.prepare('UPDATE players SET is_online = 0 WHERE is_online = 1').run();
+      } catch (_) {}
+    }
 
     const online = [];
     const offline = [];
 
     for (const player of all) {
-      const isConnected = connectedSet.has(player.name) || Boolean(player.is_online);
+      const isConnected = activeServerProcess ? (isServerRunning && connectedSet.has(player.name)) : Boolean(player.is_online);
       const permInFile = getPermissionFromFile(player.name, player.xuid, perms);
       const isOp = Boolean(player.is_op || isOperatorInFile(player.name, player.xuid, perms));
       const permission = isOp ? 'operator' : (permInFile || player.permission || 'member');

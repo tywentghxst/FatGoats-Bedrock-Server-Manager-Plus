@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import api from '../api';
 import { useAuth } from '../context/AuthContext';
+import { safeCopyToClipboard } from '../utils/clipboard';
 
 export const Players = () => {
   const { user } = useAuth();
@@ -181,9 +182,9 @@ export const Players = () => {
     }
   };
 
-  const copyToClipboard = (text, label) => {
+  const copyToClipboard = async (text, label) => {
     if (!text) return;
-    navigator.clipboard.writeText(text);
+    await safeCopyToClipboard(text);
     showToast('info', `📋 Copied ${label} (${text}) to clipboard!`);
   };
 

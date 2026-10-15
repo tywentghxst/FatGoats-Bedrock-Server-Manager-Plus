@@ -21,6 +21,7 @@ class ServerProcess extends EventEmitter {
       }
     } catch (_) {}
     this.tps = 20.0;
+    this.port = 19132;
     this.realCpu = 0.0;
     this.realMemoryMb = 0;
     this.allocatedRamMb = 4096;
@@ -110,6 +111,19 @@ class ServerProcess extends EventEmitter {
         const match = content.match(/^server-ram-limit\s*=\s*(\d+)/im);
         if (match) {
           this.allocatedRamMb = parseInt(match[1], 10);
+        }
+      }
+    } catch (_) {}
+  }
+
+  _readPortFromProperties() {
+    try {
+      const propsPath = path.join(config.BDS_DIR, 'server.properties');
+      if (fs.existsSync(propsPath)) {
+        const content = fs.readFileSync(propsPath, 'utf8');
+        const match = content.match(/^server-port\s*=\s*(\d+)/m);
+        if (match) {
+          this.port = parseInt(match[1], 10);
         }
       }
     } catch (_) {}
@@ -352,11 +366,29 @@ class ServerProcess extends EventEmitter {
       this.stopTimeout = setTimeout(() => {
         if (this.childProcess) {
           this._appendLog('[ServerManager] Server did not stop in 30 seconds. Forcing shutdown (kill)...');
+          const pid = this.childProcess.pid;
           try {
-            this.childProcess.kill('SIGKILL');
+            if (process.platform === 'win32' && pid) {
+              exec(`taskkill /F /T /PID ${pid}`, () => {});
+            } else {
+              this.childProcess.kill('SIGKILL');
+            }
           } catch (e) {
             console.error('[ServerProcess] Error force-killing process:', e.message);
           }
+          // Fallback if close event didn't trigger
+          setTimeout(() => {
+            if (this.state !== 'stopped') {
+              this._stopResourceMonitoring();
+              this.state = 'stopped';
+              this.startTime = null;
+              this.playerCount = 0;
+              this.connectedPlayers.clear();
+              this.childProcess = null;
+              this.emit('stopped', { code: -1, signal: 'SIGKILL' });
+              cleanupAndResolve();
+            }
+          }, 3000);
         }
       }, 30000);
 
@@ -378,6 +410,38 @@ class ServerProcess extends EventEmitter {
         } catch (_) {}
       }
     });
+  }
+
+  async kill() {
+    if (this.state === 'stopped' && !this.childProcess) {
+      return { success: true, message: 'Server is already stopped' };
+    }
+
+    this._appendLog('[ServerManager] Force-killing server process immediately...');
+    const pid = this.childProcess ? this.childProcess.pid : null;
+    this._stopResourceMonitoring();
+    if (this.stopTimeout) {
+      clearTimeout(this.stopTimeout);
+      this.stopTimeout = null;
+    }
+
+    if (pid) {
+      try {
+        if (process.platform === 'win32') {
+          exec(`taskkill /F /T /PID ${pid}`, () => {});
+        } else {
+          this.childProcess.kill('SIGKILL');
+        }
+      } catch (_) {}
+    }
+
+    this.state = 'stopped';
+    this.startTime = null;
+    this.playerCount = 0;
+    this.connectedPlayers.clear();
+    this.childProcess = null;
+    this.emit('stopped', { code: -1, signal: 'SIGKILL' });
+    return { success: true, message: 'Server process forcefully terminated' };
   }
 
   async restart() {
@@ -445,6 +509,7 @@ class ServerProcess extends EventEmitter {
 
     this._readMaxPlayersFromProperties();
     this._readAllocatedRamFromProperties();
+    this._readPortFromProperties();
 
     const exeName = process.platform === 'win32' ? 'bedrock_server.exe' : 'bedrock_server';
     const exePath = path.join(config.BDS_DIR, exeName);
@@ -463,6 +528,7 @@ class ServerProcess extends EventEmitter {
       state: this.state,
       uptime,
       pid: this.childProcess ? this.childProcess.pid : null,
+      port: this.port || 19132,
       playerCount: this.playerCount,
       maxPlayers: this.maxPlayers,
       version: this.version,

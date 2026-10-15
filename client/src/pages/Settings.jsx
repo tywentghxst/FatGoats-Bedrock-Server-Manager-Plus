@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import api from '../api';
 import { useAuth } from '../context/AuthContext';
+import { safeCopyToClipboard } from '../utils/clipboard';
 
 export const Settings = () => {
   const { user, updateCredentials, isAdmin } = useAuth();
@@ -380,12 +381,12 @@ export const Settings = () => {
   const handleCopyPortalLink = async () => {
     const cleanSlug = (portalSlug || 'server').trim().replace(/^\/+|\/+$/g, '');
     const fullUrl = `${window.location.origin}/${cleanSlug}`;
-    try {
-      await navigator.clipboard.writeText(fullUrl);
+    const ok = await safeCopyToClipboard(fullUrl);
+    if (ok) {
       setCopiedLink(true);
       setTimeout(() => setCopiedLink(false), 3000);
       setCredToast({ type: 'success', text: `📋 Copied player portal link to clipboard: ${fullUrl}` });
-    } catch (_) {
+    } else {
       setCredToast({ type: 'info', text: `Player portal link: ${fullUrl}` });
     }
   };

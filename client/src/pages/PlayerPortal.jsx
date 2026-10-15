@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../api';
 import { useAuth } from '../context/AuthContext';
+import { safeCopyToClipboard } from '../utils/clipboard';
 
 export const PlayerPortal = () => {
   const { user, login, isAuthenticated } = useAuth();
@@ -394,8 +395,8 @@ export const PlayerPortal = () => {
                                   <button
                                     type="button"
                                     className="btn-portal-copy-tag"
-                                    onClick={() => {
-                                      navigator.clipboard.writeText(status.tunnel.publicAddress);
+                                    onClick={async () => {
+                                      await safeCopyToClipboard(status.tunnel.publicAddress);
                                       setActionMessage({ type: 'success', text: `📋 Copied server address "${status.tunnel.publicAddress}" to clipboard!` });
                                     }}
                                   >
@@ -496,8 +497,8 @@ export const PlayerPortal = () => {
                                   <button
                                     type="button"
                                     className="btn-portal-copy-tag"
-                                    onClick={() => {
-                                      navigator.clipboard.writeText(status.xboxBot.gamertag);
+                                    onClick={async () => {
+                                      await safeCopyToClipboard(status.xboxBot.gamertag);
                                       setActionMessage({
                                         type: 'success',
                                         text: `📋 Copied Gamertag "${status.xboxBot.gamertag}" to clipboard!`,

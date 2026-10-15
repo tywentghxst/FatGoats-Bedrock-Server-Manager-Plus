@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import api from '../api';
 import { useAuth } from '../context/AuthContext';
+import { safeCopyToClipboard } from '../utils/clipboard';
 
 export const XboxLive = () => {
   const { canControlServer } = useAuth();
@@ -208,9 +209,9 @@ export const XboxLive = () => {
     } catch (_) {}
   };
 
-  const handleCopyAddress = (text) => {
+  const handleCopyAddress = async (text) => {
     if (!text) return;
-    navigator.clipboard.writeText(text);
+    await safeCopyToClipboard(text);
     setCopyToast(`Copied "${text}" to clipboard!`);
     setTimeout(() => setCopyToast(null), 3000);
   };
@@ -282,7 +283,11 @@ export const XboxLive = () => {
           ...prev,
           pendingLogin: res.pendingLogin,
         }));
-        setToast({ type: 'info', text: `🔑 Device code [${res.pendingLogin.userCode}] generated! Click below to sign in.` });
+        await safeCopyToClipboard(res.pendingLogin.userCode);
+        setToast({
+          type: 'info',
+          text: `🔑 Device code [${res.pendingLogin.userCode}] copied to clipboard! Click "Open Microsoft Login" below.`,
+        });
       } else if (res && res.authenticated) {
         setToast({ type: 'success', text: `✓ Signed in as ${res.account?.gamertag || 'Xbox Bot'}!` });
       } else {
@@ -458,16 +463,16 @@ export const XboxLive = () => {
     }
   };
 
-  const copyDeviceCode = () => {
+  const copyDeviceCode = async () => {
     const codeObj = status?.pendingLogin;
     if (codeObj?.userCode) {
-      navigator.clipboard.writeText(codeObj.userCode);
+      await safeCopyToClipboard(codeObj.userCode);
       const uri = codeObj.verificationUri || `https://www.microsoft.com/link?otc=${codeObj.userCode}`;
       setToast({
         type: 'success',
         text: `📋 Copied code [${codeObj.userCode}] to clipboard! Opening Microsoft login...`,
       });
-      window.open(uri, '_blank');
+      window.open(uri, '_blank', 'noopener,noreferrer');
     }
   };
 
@@ -1034,8 +1039,8 @@ export const XboxLive = () => {
                     <button
                       type="button"
                       className="btn-code-copy"
-                      onClick={() => {
-                        navigator.clipboard.writeText(status.account.gamertag);
+                      onClick={async () => {
+                        await safeCopyToClipboard(status.account.gamertag);
                         setToast({ type: 'success', text: `📋 Copied Gamertag "${status.account.gamertag}" to clipboard!` });
                       }}
                       title="Copy Gamertag to share with players"
@@ -1141,16 +1146,35 @@ export const XboxLive = () => {
                   </div>
 
                   <div className="d-flex gap-3 flex-wrap">
+                    <a
+                      href={pendingLogin.verificationUri}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="btn btn-primary btn-lg flex-1 text-center font-bold d-flex items-center justify-center gap-2"
+                      onClick={async () => {
+                        await safeCopyToClipboard(pendingLogin.userCode);
+                        setToast({
+                          type: 'success',
+                          text: `📋 Copied code [${pendingLogin.userCode}]! Opening Microsoft login...`,
+                        });
+                      }}
+                    >
+                      <span>📋</span>
+                      <span>Copy Code &amp; Open Microsoft Login ↗</span>
+                    </a>
                     <button
                       type="button"
-                      className="btn btn-primary btn-lg flex-1"
-                      onClick={copyDeviceCode}
+                      className="btn btn-secondary btn-lg"
+                      onClick={async () => {
+                        await safeCopyToClipboard(pendingLogin.userCode);
+                        setToast({ type: 'success', text: `📋 Code [${pendingLogin.userCode}] copied to clipboard!` });
+                      }}
                     >
-                      📋 Copy Code &amp; Open Microsoft Login ↗
+                      Copy Code
                     </button>
                     <button
                       type="button"
-                      className="btn btn-secondary"
+                      className="btn btn-secondary btn-lg"
                       onClick={handleCancelLogin}
                     >
                       Cancel

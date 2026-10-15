@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import api from '../api';
 import { useAuth } from '../context/AuthContext';
+import { safeCopyToClipboard } from '../utils/clipboard';
 
 export const Users = () => {
   const { user: currentUser } = useAuth();
@@ -136,13 +137,12 @@ export const Users = () => {
   };
 
   const copyToClipboard = async (text, label) => {
-    try {
-      await navigator.clipboard.writeText(text);
+    const ok = await safeCopyToClipboard(text);
+    if (ok) {
       setCopyFeedback(`Copied ${label} to clipboard!`);
       setTimeout(() => setCopyFeedback(null), 3000);
-    } catch (err) {
-      console.error('Clipboard copy failed:', err);
-      setError('Could not copy to clipboard.');
+    } else {
+      setError(`Could not copy to clipboard: ${text}`);
     }
   };
 

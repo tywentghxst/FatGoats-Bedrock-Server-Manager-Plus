@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import api from '../api';
+import { safeCopyToClipboard } from '../utils/clipboard';
 
 export const Dashboard = () => {
   const { isAdmin, canControlServer } = useAuth();
@@ -95,9 +96,9 @@ export const Dashboard = () => {
     return () => clearInterval(interval);
   }, [fetchXboxStatus]);
 
-  const handleCopyAddress = (text) => {
+  const handleCopyAddress = async (text) => {
     if (!text) return;
-    navigator.clipboard.writeText(text);
+    await safeCopyToClipboard(text);
     setCopyToast(`Copied "${text}" to clipboard!`);
     setTimeout(() => setCopyToast(null), 3000);
   };

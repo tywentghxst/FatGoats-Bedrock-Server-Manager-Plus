@@ -1,6 +1,6 @@
 {
-  "commit": "56d6302",
-  "commitFull": "56d630216ac93f563d2480ab763af59ab83dcb5e",
+  "commit": "80847ff",
+  "commitFull": "80847ff0bcaba017775746f918e2eb003ae0cb78",
   "date": "Just now",
-  "subject": "fix: configure nethernet transport and resolve XUID for BDS permissions"
+  "subject": "feat(addons): add smart pack swap suggestions tab and on-click pack type swapper (BP <-> RP)"
 }

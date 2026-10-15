@@ -1,6 +1,6 @@
 {
-  "commit": "47b21b6",
-  "commitFull": "47b21b6a22ea67c1340b0808cf701f98bc7dd82a",
+  "commit": "56d6302",
+  "commitFull": "56d630216ac93f563d2480ab763af59ab83dcb5e",
   "date": "Just now",
-  "subject": "fix(portal): resilient active addons resolution and interactive collapsible tile on Player Portal"
+  "subject": "fix: configure nethernet transport and resolve XUID for BDS permissions"
 }

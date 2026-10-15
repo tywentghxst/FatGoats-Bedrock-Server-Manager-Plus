@@ -1,6 +1,6 @@
 {
-  "commit": "47ef84d",
-  "commitFull": "47ef84d03f03ff0462e6b24cbfedf568247302a6",
+  "commit": "5f1fcdb",
+  "commitFull": "5f1fcdbc3e3004128c3aad3d4376634b97fed5ad",
   "date": "Just now",
-  "subject": "feat(addons): display pack logos in load orders and add automated web URL search wizard on upload"
+  "subject": "fix(addons): robust Bing search with official Minecraft Marketplace support and URL decoding"
 }

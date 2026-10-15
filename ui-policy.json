@@ -1,0 +1,193 @@
+{
+  "fonts": [
+    "Inter",
+    "JetBrains Mono",
+    "-apple-system",
+    "BlinkMacSystemFont",
+    "Segoe UI",
+    "Roboto",
+    "system-ui",
+    "Fira Code",
+    "Consolas",
+    "monospace",
+    "sans-serif"
+  ],
+  "fontSizes": [
+    9.6,
+    10,
+    10.4,
+    11,
+    11.2,
+    11.48,
+    11.52,
+    12,
+    12.8,
+    13,
+    13.6,
+    14,
+    14.4,
+    15,
+    15.2,
+    16,
+    16.8,
+    17.6,
+    18,
+    18.4,
+    19.2,
+    20,
+    20.8,
+    21.6,
+    22.4,
+    24,
+    25.6,
+    28,
+    28.8,
+    32,
+    35.2,
+    40,
+    44,
+    48,
+    64
+  ],
+  "typeRules": [
+    {
+      "selector": "h1",
+      "sizes": [
+        24,
+        25.6,
+        28,
+        32,
+        35.2,
+        40,
+        44,
+        48,
+        64
+      ]
+    },
+    {
+      "selector": "h2",
+      "sizes": [
+        18,
+        19.2,
+        20,
+        20.8,
+        21.6,
+        22.4,
+        24,
+        28,
+        32
+      ]
+    },
+    {
+      "selector": "h3",
+      "sizes": [
+        16,
+        16.8,
+        17.6,
+        18,
+        19.2,
+        20,
+        21.6,
+        22.4,
+        24
+      ]
+    },
+    {
+      "selector": "h4, h5, h6",
+      "sizes": [
+        12.8,
+        13,
+        13.6,
+        14,
+        14.4,
+        15.2,
+        16,
+        16.8,
+        18,
+        20
+      ]
+    },
+    {
+      "selector": "button, [role=button]",
+      "sizes": [
+        11,
+        11.2,
+        11.48,
+        11.52,
+        12,
+        12.8,
+        13,
+        13.6,
+        14,
+        14.4,
+        15,
+        15.2,
+        16,
+        16.8,
+        18
+      ]
+    },
+    {
+      "selector": "input, select, textarea",
+      "sizes": [
+        12,
+        12.8,
+        13,
+        13.6,
+        14,
+        14.4,
+        15,
+        15.2,
+        16
+      ]
+    },
+    {
+      "selector": "code, pre, .font-mono",
+      "sizes": [
+        9.6,
+        10,
+        10.4,
+        11,
+        11.2,
+        11.48,
+        11.52,
+        12,
+        12.8,
+        13,
+        13.6,
+        14,
+        14.4,
+        15,
+        15.2,
+        16
+      ]
+    }
+  ],
+  "minControlSize": 15,
+  "controlSizeRules": [],
+  "minControlGap": 8,
+  "minControlInset": 8,
+  "controlContainers": [
+    "[data-ui-container]"
+  ],
+  "minLayoutGap": 8,
+  "bannedCopy": [
+    "unlock your potential",
+    "seamlessly",
+    "game-changing"
+  ],
+  "viewports": [
+    {
+      "width": 390,
+      "height": 844
+    },
+    {
+      "width": 1440,
+      "height": 900
+    }
+  ],
+  "colorSchemes": [
+    "dark"
+  ],
+  "exceptions": []
+}

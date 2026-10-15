@@ -259,6 +259,100 @@ suppress-session-update-message: false
   }
 
   // ---------------------------------------------------------------------------
+  // Java Detection
+  // ---------------------------------------------------------------------------
+  findJavaExecutable() {
+    const candidates = [];
+
+    // Local bundled JRE
+    const localJre = path.join(__dirname, '..', '..', 'jre', 'bin', process.platform === 'win32' ? 'java.exe' : 'java');
+    if (fs.existsSync(localJre)) candidates.push(localJre);
+
+    if (process.env.JAVA_HOME) {
+      const jh = path.join(process.env.JAVA_HOME, 'bin', process.platform === 'win32' ? 'java.exe' : 'java');
+      if (fs.existsSync(jh)) candidates.push(jh);
+    }
+
+    if (process.platform === 'win32') {
+      const wellKnown = [
+        'C:\\Program Files\\Common Files\\Oracle\\Java\\javapath\\java.exe',
+        'C:\\Program Files (x86)\\Common Files\\Oracle\\Java\\javapath\\java.exe',
+      ];
+      for (const p of wellKnown) {
+        if (fs.existsSync(p)) candidates.push(p);
+      }
+
+      const searchRoots = [
+        'C:\\Program Files\\Java',
+        'C:\\Program Files\\Eclipse Adoptium',
+        'C:\\Program Files\\Microsoft',
+        'C:\\Program Files\\Amazon Corretto',
+        'C:\\Program Files\\Zulu',
+        'C:\\Program Files\\BellSoft',
+        'C:\\Program Files (x86)\\Java',
+      ];
+
+      for (const root of searchRoots) {
+        if (fs.existsSync(root)) {
+          try {
+            const entries = fs.readdirSync(root);
+            for (const entry of entries) {
+              const j = path.join(root, entry, 'bin', 'java.exe');
+              if (fs.existsSync(j)) candidates.push(j);
+            }
+          } catch (_) {}
+        }
+      }
+
+      try {
+        const { execSync } = require('child_process');
+        const out = execSync('where.exe java', { encoding: 'utf8', timeout: 3000 });
+        for (const line of out.split(/\r?\n/)) {
+          const trimmed = line.trim();
+          if (trimmed && fs.existsSync(trimmed)) candidates.push(trimmed);
+        }
+      } catch (_) {}
+    } else {
+      try {
+        const { execSync } = require('child_process');
+        const out = execSync('which java', { encoding: 'utf8', timeout: 3000 });
+        const line = out.trim();
+        if (line && fs.existsSync(line)) candidates.push(line);
+      } catch (_) {}
+    }
+
+    const unique = Array.from(new Set(candidates));
+    if (unique.length > 0) {
+      unique.sort((a, b) => {
+        const aIsX86 = a.toLowerCase().includes('program files (x86)');
+        const bIsX86 = b.toLowerCase().includes('program files (x86)');
+        if (aIsX86 && !bIsX86) return 1;
+        if (!aIsX86 && bIsX86) return -1;
+
+        // Prefer jdk over jre
+        const aIsJdk = /jdk/i.test(a);
+        const bIsJdk = /jdk/i.test(b);
+        if (aIsJdk && !bIsJdk) return -1;
+        if (!aIsJdk && bIsJdk) return 1;
+
+        const numA = (a.match(/\d+(\.\d+)*/g) || ['0']).pop();
+        const numB = (b.match(/\d+(\.\d+)*/g) || ['0']).pop();
+        return parseFloat(numB) - parseFloat(numA);
+      });
+      return unique[0];
+    }
+
+    // Fallback: check if plain 'java' works
+    try {
+      const { execSync } = require('child_process');
+      execSync('java -version', { stdio: 'ignore', timeout: 3000 });
+      return 'java';
+    } catch (_) {}
+
+    return null;
+  }
+
+  // ---------------------------------------------------------------------------
   // Lifecycle Management
   // ---------------------------------------------------------------------------
   async start() {
@@ -274,18 +368,34 @@ suppress-session-update-message: false
       throw new Error(`MCXboxBroadcast jar not found at ${this.jarPath}. Please verify download.`);
     }
 
+    const javaExe = this.findJavaExecutable();
+    if (!javaExe) {
+      const msg = 'Java Runtime (JRE/JDK 17+) is required for Xbox Live Friend Relay, but Java was not detected on this system. Please install Java 17+ (e.g. Oracle JDK or Eclipse Adoptium Temurin) and restart.';
+      this.state = 'error';
+      this.errorMessage = msg;
+      this._logActivity('ERROR', msg);
+      throw new Error(msg);
+    }
+
     this.writeConfigFile();
     this.errorMessage = null;
     this.state = 'starting';
 
-    this._logActivity('PROCESS', 'Starting MCXboxBroadcast Standalone (Java)...');
+    this._logActivity('PROCESS', `Starting MCXboxBroadcast Standalone (using: ${javaExe})...`);
 
     return new Promise((resolve, reject) => {
       let resolved = false;
 
       try {
-        const child = spawn('java', ['-jar', 'MCXboxBroadcastStandalone.jar'], {
+        const env = { ...process.env };
+        if (path.isAbsolute(javaExe)) {
+          const javaDir = path.dirname(javaExe);
+          env.PATH = javaDir + (process.platform === 'win32' ? ';' : ':') + (env.PATH || '');
+        }
+
+        const child = spawn(javaExe, ['-jar', 'MCXboxBroadcastStandalone.jar'], {
           cwd: this.workingDir,
+          env,
           stdio: ['pipe', 'pipe', 'pipe'],
         });
         this.process = child;
@@ -317,7 +427,11 @@ suppress-session-update-message: false
           console.error('[BroadcasterService] Failed to spawn java process:', err);
           if (this.process === child) {
             this.state = 'error';
-            this.errorMessage = `Failed to launch MCXboxBroadcast: ${err.message}`;
+            if (err.code === 'ENOENT') {
+              this.errorMessage = `Failed to launch MCXboxBroadcast: Java runtime not found (${javaExe}). Please install Java 17+ or set JAVA_HOME.`;
+            } else {
+              this.errorMessage = `Failed to launch MCXboxBroadcast: ${err.message}`;
+            }
             this._logActivity('ERROR', this.errorMessage);
           }
           if (!resolved) {

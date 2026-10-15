@@ -6,6 +6,7 @@ using System.Threading;
 using System.Net;
 using System.Text;
 using System.Windows.Forms;
+using System.Collections.Generic;
 using Microsoft.Win32;
 
 namespace BedrockServerManager.Tray
@@ -380,9 +381,51 @@ namespace BedrockServerManager.Tray
                 psi.EnvironmentVariables["NODE_ENV"] = "production";
 
                 string nodeDir = Path.GetDirectoryName(nodeExe);
-                if (!string.IsNullOrEmpty(nodeDir))
+                string existingPath = Environment.GetEnvironmentVariable("PATH") ?? "";
+                List<string> pathAdditions = new List<string>();
+                if (!string.IsNullOrEmpty(nodeDir)) pathAdditions.Add(nodeDir);
+
+                // Add Java paths to PATH so sub-processes inherit java seamlessly
+                string[] javaCandidates = new string[]
                 {
-                    psi.EnvironmentVariables["PATH"] = nodeDir + ";" + Environment.GetEnvironmentVariable("PATH");
+                    @"C:\Program Files\Common Files\Oracle\Java\javapath",
+                    @"C:\Program Files (x86)\Common Files\Oracle\Java\javapath",
+                };
+                foreach (string jc in javaCandidates)
+                {
+                    if (Directory.Exists(jc) && !existingPath.Contains(jc)) pathAdditions.Add(jc);
+                }
+
+                string[] javaRoots = new string[]
+                {
+                    @"C:\Program Files\Java",
+                    @"C:\Program Files\Eclipse Adoptium",
+                    @"C:\Program Files\Microsoft",
+                    @"C:\Program Files\Amazon Corretto",
+                    @"C:\Program Files\Zulu"
+                };
+                foreach (string root in javaRoots)
+                {
+                    if (Directory.Exists(root))
+                    {
+                        try
+                        {
+                            foreach (string sub in Directory.GetDirectories(root))
+                            {
+                                string bin = Path.Combine(sub, "bin");
+                                if (File.Exists(Path.Combine(bin, "java.exe")) && !existingPath.Contains(bin))
+                                {
+                                    pathAdditions.Add(bin);
+                                }
+                            }
+                        }
+                        catch { }
+                    }
+                }
+
+                if (pathAdditions.Count > 0)
+                {
+                    psi.EnvironmentVariables["PATH"] = string.Join(";", pathAdditions) + ";" + existingPath;
                 }
 
                 nodeProcess = new Process();

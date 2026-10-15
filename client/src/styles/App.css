@@ -6792,6 +6792,41 @@ html, body, #root {
   border-radius: 999px;
 }
 
+.portal-tunnel-desc {
+  font-size: 0.78rem;
+  color: var(--text-sub, #94a3b8);
+}
+
+.portal-toggle-btn {
+  font-size: 0.72rem !important;
+  padding: 0.25rem 0.6rem !important;
+  border-radius: var(--radius-sm, 6px);
+  background: rgba(255, 255, 255, 0.08) !important;
+  color: #e2e8f0 !important;
+  border: 1px solid rgba(255, 255, 255, 0.15) !important;
+  transition: all 0.15s ease;
+}
+
+.portal-toggle-btn:hover {
+  background: rgba(139, 92, 246, 0.25) !important;
+  border-color: rgba(139, 92, 246, 0.5) !important;
+  color: #fff !important;
+}
+
+.portal-addons-collapsed-preview {
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.portal-addon-chip {
+  font-size: 0.72rem;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  background: rgba(139, 92, 246, 0.12);
+  border: 1px solid rgba(139, 92, 246, 0.28);
+  color: #c4b5fd;
+  white-space: nowrap;
+}
+
 .portal-addons-empty {
   display: flex;
   flex-direction: column;

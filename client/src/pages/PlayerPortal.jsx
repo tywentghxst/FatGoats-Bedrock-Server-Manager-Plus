@@ -16,6 +16,7 @@ export const PlayerPortal = () => {
   const [cooldown, setCooldown] = useState(0);
   const [logoError, setLogoError] = useState(false);
   const [botAvatarError, setBotAvatarError] = useState(false);
+  const [addonsTileExpanded, setAddonsTileExpanded] = useState(true);
 
   // Embedded login states (for requireLogin mode)
   const [loginUser, setLoginUser] = useState('');
@@ -595,68 +596,110 @@ export const PlayerPortal = () => {
                     return (
                       <div key="installed_addons" className="portal-section-block portal-addons-section mt-4">
                         <div className="portal-tunnel-card portal-addons-card">
-                          <div className="portal-tunnel-header">
+                          <div
+                            className="portal-tunnel-header d-flex items-center justify-between cursor-pointer select-none"
+                            onClick={() => setAddonsTileExpanded(!addonsTileExpanded)}
+                            title="Click to toggle addons list"
+                            style={{ cursor: 'pointer' }}
+                          >
                             <div className="d-flex items-center gap-2">
                               <span className="portal-tunnel-logo">🧩</span>
                               <div>
-                                <h3 className="portal-tunnel-title">Active Server Addons</h3>
-                                <p className="portal-tunnel-desc">
+                                <div className="d-flex items-center gap-2">
+                                  <h3 className="portal-tunnel-title m-0">Active Server Addons</h3>
+                                  <span className="portal-badge portal-badge-count">
+                                    {addons.length} {addons.length === 1 ? 'Addon' : 'Addons'}
+                                  </span>
+                                </div>
+                                <p className="portal-tunnel-desc m-0 mt-0.5">
                                   Installed and active custom addons for this world
                                 </p>
                               </div>
                             </div>
-                            <span className="portal-badge portal-badge-count">
-                              {addons.length} {addons.length === 1 ? 'Addon' : 'Addons'}
-                            </span>
+
+                            <div className="d-flex items-center gap-2">
+                              <button
+                                type="button"
+                                className="btn btn-secondary btn-xs portal-toggle-btn"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setAddonsTileExpanded(!addonsTileExpanded);
+                                }}
+                                title={addonsTileExpanded ? 'Collapse addons list' : 'Expand addons list'}
+                              >
+                                {addonsTileExpanded ? '▲ Collapse' : '▼ View Addons'}
+                              </button>
+                            </div>
                           </div>
 
-                          {addons.length === 0 ? (
-                            <div className="portal-addons-empty">
-                              <span className="portal-empty-icon">📦</span>
-                              <p className="text-sub text-sm">No custom addons currently active on this world.</p>
-                            </div>
-                          ) : (
-                            <div className="portal-addons-grid">
-                              {addons.map((addon) => (
-                                <div key={addon.id} className="portal-addon-card">
-                                  <div className="portal-addon-icon-wrap">
-                                    {addon.hasIcon && addon.iconUuid ? (
-                                      <img
-                                        src={`/api/addons/${addon.iconUuid}/icon`}
-                                        alt={addon.name}
-                                        className="portal-addon-icon-img"
-                                        onError={(e) => {
-                                          e.target.style.display = 'none';
-                                          const fallback = e.target.parentElement.querySelector('.portal-addon-icon-fallback');
-                                          if (fallback) fallback.style.display = 'flex';
-                                        }}
-                                      />
-                                    ) : null}
-                                    <div
-                                      className="portal-addon-icon-fallback"
-                                      style={{ display: addon.hasIcon && addon.iconUuid ? 'none' : 'flex' }}
-                                    >
-                                      🧩
-                                    </div>
-                                  </div>
-                                  <div className="portal-addon-info">
-                                    <div className="portal-addon-header-line">
-                                      <h4 className="portal-addon-name" title={addon.name}>
-                                        {addon.name}
-                                      </h4>
-                                      {addon.version && (
-                                        <span className="portal-addon-version">v{addon.version}</span>
-                                      )}
-                                    </div>
-                                    {addon.description ? (
-                                      <p className="portal-addon-desc">{addon.description}</p>
-                                    ) : (
-                                      <p className="portal-addon-desc text-muted">No details provided</p>
-                                    )}
-                                  </div>
-                                </div>
+                          {/* When collapsed, show compact summary chips preview */}
+                          {!addonsTileExpanded && addons.length > 0 && (
+                            <div
+                              className="portal-addons-collapsed-preview pt-2 mt-2 border-top d-flex items-center gap-1.5 flex-wrap cursor-pointer"
+                              onClick={() => setAddonsTileExpanded(true)}
+                              title="Click to expand full details"
+                            >
+                              <span className="text-xs text-sub font-semibold">Active:</span>
+                              {addons.map((a) => (
+                                <span key={a.id} className="portal-addon-chip">
+                                  {a.name} {a.version ? `(v${a.version})` : ''}
+                                </span>
                               ))}
                             </div>
+                          )}
+
+                          {/* Full expanded list */}
+                          {addonsTileExpanded && (
+                            <>
+                              {addons.length === 0 ? (
+                                <div className="portal-addons-empty">
+                                  <span className="portal-empty-icon">📦</span>
+                                  <p className="text-sub text-sm m-0">No custom addons currently active on this world.</p>
+                                </div>
+                              ) : (
+                                <div className="portal-addons-grid mt-3">
+                                  {addons.map((addon) => (
+                                    <div key={addon.id} className="portal-addon-card">
+                                      <div className="portal-addon-icon-wrap">
+                                        {addon.hasIcon && addon.iconUuid ? (
+                                          <img
+                                            src={`/api/addons/${addon.iconUuid}/icon`}
+                                            alt={addon.name}
+                                            className="portal-addon-icon-img"
+                                            onError={(e) => {
+                                              e.target.style.display = 'none';
+                                              const fallback = e.target.parentElement.querySelector('.portal-addon-icon-fallback');
+                                              if (fallback) fallback.style.display = 'flex';
+                                            }}
+                                          />
+                                        ) : null}
+                                        <div
+                                          className="portal-addon-icon-fallback"
+                                          style={{ display: addon.hasIcon && addon.iconUuid ? 'none' : 'flex' }}
+                                        >
+                                          🧩
+                                        </div>
+                                      </div>
+                                      <div className="portal-addon-info">
+                                        <div className="portal-addon-header-line">
+                                          <h4 className="portal-addon-name" title={addon.name}>
+                                            {addon.name}
+                                          </h4>
+                                          {addon.version && (
+                                            <span className="portal-addon-version">v{addon.version}</span>
+                                          )}
+                                        </div>
+                                        {addon.description ? (
+                                          <p className="portal-addon-desc">{addon.description}</p>
+                                        ) : (
+                                          <p className="portal-addon-desc text-muted">Active world addon</p>
+                                        )}
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </>
                           )}
                         </div>
                       </div>

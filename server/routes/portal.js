@@ -112,21 +112,36 @@ function getEnabledPortalAddons() {
 
     const active = addonService.getActiveAddons(worldName);
     const activePacks = [...(active.behaviorPacks || []), ...(active.resourcePacks || [])];
-    const activeUuids = [...new Set(activePacks.map(p => p.uuid).filter(Boolean))];
-
-    if (activeUuids.length === 0) {
+    if (activePacks.length === 0) {
       return [];
     }
 
-    const placeholders = activeUuids.map(() => '?').join(',');
-    const dbAddons = db.prepare(`SELECT uuid, name, display_name, description, version, type, group_id, original_filename, is_system FROM addons WHERE uuid IN (${placeholders})`).all(...activeUuids);
+    // Load all addons from DB and index into a case-insensitive lookup map
+    let allDbAddons = [];
+    try {
+      allDbAddons = db.prepare('SELECT uuid, name, display_name, description, version, type, group_id, original_filename, is_system FROM addons').all();
+    } catch (_) {}
+
+    const dbMap = new Map();
+    for (const a of allDbAddons) {
+      if (a.uuid) {
+        dbMap.set(a.uuid.toLowerCase(), a);
+      }
+    }
 
     const consolidated = new Map();
 
-    for (const pack of dbAddons) {
-      if (pack.is_system === 1) continue;
-      const nameLower = (pack.name || '').toLowerCase();
-      const origLower = (pack.original_filename || '').toLowerCase();
+    for (const pack of activePacks) {
+      const packUuid = pack.uuid || pack.pack_id;
+      if (!packUuid) continue;
+
+      const dbInfo = dbMap.get(packUuid.toLowerCase());
+
+      // Filter out internal system addons (chemistry, editor, vanilla, gametest, etc.)
+      if (dbInfo && dbInfo.is_system === 1) continue;
+
+      const nameLower = (dbInfo?.name || pack.name || pack.rawName || '').toLowerCase();
+      const origLower = (dbInfo?.original_filename || '').toLowerCase();
       if (
         nameLower.startsWith('vanilla') || nameLower.startsWith('chemistry') || nameLower.startsWith('editor') ||
         origLower.startsWith('vanilla') || origLower.startsWith('chemistry') || origLower.startsWith('editor') ||
@@ -135,47 +150,52 @@ function getEnabledPortalAddons() {
         continue;
       }
 
-      let cleanTitle = (pack.display_name && pack.display_name !== 'pack.name')
-        ? pack.display_name
-        : (pack.name && pack.name !== 'pack.name' ? pack.name : '');
+      let cleanTitle = (dbInfo?.display_name && dbInfo.display_name !== 'pack.name')
+        ? dbInfo.display_name
+        : (dbInfo?.name && dbInfo.name !== 'pack.name'
+            ? dbInfo.name
+            : (pack.name || pack.rawName || ''));
 
-      if (!cleanTitle && pack.original_filename) {
-        cleanTitle = pack.original_filename.replace(/\.(mcaddon|mcpack|zip)$/i, '');
+      if (!cleanTitle && dbInfo?.original_filename) {
+        cleanTitle = dbInfo.original_filename.replace(/\.(mcaddon|mcpack|zip)$/i, '');
       }
       if (!cleanTitle) cleanTitle = 'Unknown Addon';
 
       // Clean minecraft formatting codes like §a, §e, §l, §r and pack tags
-      const rawDesc = pack.description || '';
+      const rawDesc = dbInfo?.description || '';
       const cleanDesc = rawDesc
         .replace(/§[0-9a-fk-or]/gi, '')
         .replace(/\s*(behavior\s*pack|resource\s*pack|\(bp\)|\(rp\)|\bbp\b|\brp\b)\.?/gi, '')
         .trim();
 
       // Deduplication key: prefer group_id, then normalized original_filename without extension, or normalized clean title
-      const normKey = pack.group_id
-        ? `group:${pack.group_id}`
-        : (pack.original_filename
-            ? `orig:${pack.original_filename.toLowerCase().replace(/\.(mcaddon|mcpack|zip)$/i, '').replace(/[\s\-_]*(behavior|resource|bp|rp)[\s\-_]*(pack)?$/i, '')}`
+      const groupId = dbInfo?.group_id || pack.groupId;
+      const origFilename = dbInfo?.original_filename;
+
+      const normKey = groupId
+        ? `group:${groupId}`
+        : (origFilename
+            ? `orig:${origFilename.toLowerCase().replace(/\.(mcaddon|mcpack|zip)$/i, '').replace(/[\s\-_]*(behavior|resource|bp|rp)[\s\-_]*(pack)?$/i, '')}`
             : `name:${cleanTitle.toLowerCase().replace(/[\s\-_]*(behavior|resource|bp|rp)[\s\-_]*(pack)?$/i, '')}`);
 
-      const iconPath = addonService.getPackIconPath(pack.uuid);
+      const iconPath = addonService.getPackIconPath(packUuid);
       const hasIcon = Boolean(iconPath);
 
       if (!consolidated.has(normKey)) {
         consolidated.set(normKey, {
-          id: pack.uuid,
+          id: packUuid,
           name: cleanTitle,
           description: cleanDesc,
-          version: pack.version || '1.0.0',
+          version: dbInfo?.version || pack.version || '1.0.0',
           hasIcon,
-          iconUuid: hasIcon ? pack.uuid : null
+          iconUuid: hasIcon ? packUuid : null
         });
       } else {
         const existing = consolidated.get(normKey);
         // If companion has an icon and existing doesn't, use it
         if (!existing.hasIcon && hasIcon) {
           existing.hasIcon = true;
-          existing.iconUuid = pack.uuid;
+          existing.iconUuid = packUuid;
         }
         // If existing has no description and this one has, use it
         if (!existing.description && cleanDesc) {

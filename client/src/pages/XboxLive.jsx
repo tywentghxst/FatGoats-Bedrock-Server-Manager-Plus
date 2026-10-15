@@ -277,7 +277,17 @@ export const XboxLive = () => {
     setToast(null);
     try {
       const res = await api.Xbox.startLogin();
-      setToast({ type: 'info', text: 'Device code generated! Follow the instructions below to sign in.' });
+      if (res && res.pendingLogin) {
+        setStatus((prev) => ({
+          ...prev,
+          pendingLogin: res.pendingLogin,
+        }));
+        setToast({ type: 'info', text: `🔑 Device code [${res.pendingLogin.userCode}] generated! Click below to sign in.` });
+      } else if (res && res.authenticated) {
+        setToast({ type: 'success', text: `✓ Signed in as ${res.account?.gamertag || 'Xbox Bot'}!` });
+      } else {
+        setToast({ type: 'info', text: res?.message || 'Device code generated! Follow the instructions below to sign in.' });
+      }
       await fetchStatus();
     } catch (err) {
       setToast({ type: 'error', text: err.message || 'Failed to start Microsoft login.' });
@@ -449,13 +459,15 @@ export const XboxLive = () => {
   };
 
   const copyDeviceCode = () => {
-    if (status?.pendingLogin?.userCode) {
-      navigator.clipboard.writeText(status.pendingLogin.userCode);
+    const codeObj = status?.pendingLogin;
+    if (codeObj?.userCode) {
+      navigator.clipboard.writeText(codeObj.userCode);
+      const uri = codeObj.verificationUri || `https://www.microsoft.com/link?otc=${codeObj.userCode}`;
       setToast({
         type: 'success',
-        text: `📋 Copied code [${status.pendingLogin.userCode}] to clipboard! Opening Microsoft link...`,
+        text: `📋 Copied code [${codeObj.userCode}] to clipboard! Opening Microsoft login...`,
       });
-      window.open(status.pendingLogin.verificationUri || 'https://www.microsoft.com/link', '_blank');
+      window.open(uri, '_blank');
     }
   };
 
@@ -1150,12 +1162,21 @@ export const XboxLive = () => {
                 <div className="d-flex gap-3 flex-wrap">
                   <button
                     type="button"
-                    className="btn btn-primary flex-1 py-3"
+                    className="btn btn-primary flex-1 py-3 font-bold d-flex items-center justify-center gap-2"
                     onClick={handleStartLogin}
                     disabled={actionLoading}
                   >
-                    <span className="icon mr-2">🔑</span>
-                    Connect Microsoft Account (1-Click Link)
+                    {actionLoading ? (
+                      <>
+                        <span className="spinner-sm" />
+                        <span>Generating Microsoft Device Code (1-Click Link)...</span>
+                      </>
+                    ) : (
+                      <>
+                        <span className="icon">🔑</span>
+                        <span>Connect Microsoft Account (1-Click Link)</span>
+                      </>
+                    )}
                   </button>
                 </div>
               )}

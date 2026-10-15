@@ -284,12 +284,13 @@ suppress-session-update-message: false
       let resolved = false;
 
       try {
-        this.process = spawn('java', ['-jar', 'MCXboxBroadcastStandalone.jar'], {
+        const child = spawn('java', ['-jar', 'MCXboxBroadcastStandalone.jar'], {
           cwd: this.workingDir,
           stdio: ['pipe', 'pipe', 'pipe'],
         });
+        this.process = child;
 
-        this.process.stdout.on('data', (data) => {
+        child.stdout.on('data', (data) => {
           const lines = data.toString().split(/\r?\n/).filter(Boolean);
           for (const line of lines) {
             this._handleLogLine(line);
@@ -305,29 +306,33 @@ suppress-session-update-message: false
           }
         });
 
-        this.process.stderr.on('data', (data) => {
+        child.stderr.on('data', (data) => {
           const lines = data.toString().split(/\r?\n/).filter(Boolean);
           for (const line of lines) {
             this._handleLogLine(line);
           }
         });
 
-        this.process.on('error', (err) => {
+        child.on('error', (err) => {
           console.error('[BroadcasterService] Failed to spawn java process:', err);
-          this.state = 'error';
-          this.errorMessage = `Failed to launch MCXboxBroadcast: ${err.message}`;
-          this._logActivity('ERROR', this.errorMessage);
+          if (this.process === child) {
+            this.state = 'error';
+            this.errorMessage = `Failed to launch MCXboxBroadcast: ${err.message}`;
+            this._logActivity('ERROR', this.errorMessage);
+          }
           if (!resolved) {
             resolved = true;
-            reject(new Error(this.errorMessage));
+            reject(new Error(this.errorMessage || err.message));
           }
         });
 
-        this.process.on('close', (code) => {
+        child.on('close', (code) => {
           console.log(`[BroadcasterService] Process exited with code ${code}`);
           this._logActivity('PROCESS', `MCXboxBroadcast process exited (code ${code})`);
-          this.process = null;
-          this.state = 'offline';
+          if (this.process === child) {
+            this.process = null;
+            this.state = 'offline';
+          }
         });
 
         // Resolve after 4 seconds if stdout didn't fire immediately
@@ -354,42 +359,40 @@ suppress-session-update-message: false
   async stop() {
     if (!this.process || this.process.killed) {
       this.state = 'offline';
+      this.process = null;
       return { success: true, message: 'Broadcaster is already stopped.' };
     }
 
+    const proc = this.process;
     this._logActivity('PROCESS', 'Stopping MCXboxBroadcast...');
 
     return new Promise((resolve) => {
+      let resolved = false;
+      const done = () => {
+        if (!resolved) {
+          resolved = true;
+          if (this.process === proc) {
+            this.process = null;
+            this.state = 'offline';
+          }
+          this._logActivity('PROCESS', 'MCXboxBroadcast stopped.');
+          resolve({ success: true, message: 'MCXboxBroadcast stopped successfully.' });
+        }
+      };
+
       try {
-        // Try gentle shutdown
-        this.process.stdin.write('stop\n');
+        proc.stdin.write('stop\n');
       } catch (_) {}
 
-      const timeout = setTimeout(() => {
-        if (this.process && !this.process.killed) {
-          try {
-            this.process.kill();
-          } catch (_) {}
-        }
-      }, 3000);
+      proc.once('close', done);
 
-      this.process.once('close', () => {
-        clearTimeout(timeout);
-        this.process = null;
-        this.state = 'offline';
-        this._logActivity('PROCESS', 'MCXboxBroadcast stopped.');
-        resolve({ success: true, message: 'MCXboxBroadcast stopped successfully.' });
-      });
-
-      // Fallback kill
+      // Force kill fallback if not closed within 2.5s
       setTimeout(() => {
-        if (this.process) {
-          try { this.process.kill(); } catch (_) {}
-          this.process = null;
-          this.state = 'offline';
+        if (!proc.killed) {
+          try { proc.kill(); } catch (_) {}
         }
-        resolve({ success: true, message: 'MCXboxBroadcast stopped.' });
-      }, 4000);
+        done();
+      }, 2500);
     });
   }
 
@@ -438,14 +441,15 @@ suppress-session-update-message: false
     }
 
     if (userCode) {
+      const fullUri = verificationUri.includes('?otc=') ? verificationUri : `https://www.microsoft.com/link?otc=${userCode}`;
       this.pendingLogin = {
         userCode,
-        verificationUri,
+        verificationUri: fullUri,
         expiresAt: Date.now() + 15 * 60 * 1000,
         message: uncolored,
       };
       this.state = 'awaiting_login';
-      this._logActivity('AUTH', `Microsoft Device Code generated: ${userCode}. Link: ${verificationUri}`);
+      this._logActivity('AUTH', `Microsoft Device Code generated: ${userCode}. Link: ${fullUri}`);
       return;
     }
 
@@ -513,21 +517,80 @@ suppress-session-update-message: false
   // Account Linking & Logout
   // ---------------------------------------------------------------------------
   async startLogin() {
-    // If not running, start the process to generate a new device code
-    if (!this.process || this.process.killed) {
+    this.errorMessage = null;
+
+    // If already authenticated and bot process is running, return current status
+    if (this.account.authenticated && this.process && !this.process.killed) {
+      return {
+        success: true,
+        authenticated: true,
+        account: this.account,
+        message: `Already authenticated as ${this.account.gamertag}.`,
+      };
+    }
+
+    // If we already have a valid pending login code that hasn't expired, return it immediately
+    if (this.pendingLogin && this.pendingLogin.expiresAt > Date.now()) {
+      return {
+        success: true,
+        pendingLogin: this.pendingLogin,
+        message: 'Device code active. Follow link to authenticate.',
+      };
+    }
+
+    // Reset pending login
+    this.pendingLogin = null;
+    this.state = 'awaiting_login';
+
+    // If not authenticated, ensure stale cache doesn't prevent new device code generation
+    if (!this.account.authenticated) {
+      try {
+        const cacheFile = path.join(this.cacheDir, 'cache.json');
+        if (fs.existsSync(cacheFile)) {
+          fs.unlinkSync(cacheFile);
+        }
+      } catch (_) {}
+    }
+
+    // If process is running but not authenticated or has no valid code, restart it fresh
+    if (this.process && !this.process.killed) {
+      this._logActivity('AUTH', 'Restarting MCXboxBroadcast to generate fresh device code...');
+      await this.restart();
+    } else {
+      this._logActivity('AUTH', 'Starting MCXboxBroadcast to generate device code...');
       await this.start();
     }
 
-    // Wait up to 3 seconds for code if not yet received
-    if (!this.pendingLogin) {
-      await new Promise((res) => setTimeout(res, 3000));
+    // Wait up to 15 seconds for device code (or auto-authentication) to appear
+    const maxWaitMs = 15000;
+    const startTime = Date.now();
+    while (Date.now() - startTime < maxWaitMs) {
+      if (this.pendingLogin) {
+        return {
+          success: true,
+          message: 'Device code generated. Follow link to authenticate.',
+          pendingLogin: this.pendingLogin,
+        };
+      }
+      if (this.account.authenticated) {
+        return {
+          success: true,
+          authenticated: true,
+          account: this.account,
+          message: `Authenticated as ${this.account.gamertag}`,
+        };
+      }
+      if (this.state === 'error') {
+        throw new Error(this.errorMessage || 'MCXboxBroadcast process encountered an error during login.');
+      }
+      await new Promise((r) => setTimeout(r, 250));
     }
 
     return {
       success: true,
       message: this.pendingLogin
         ? 'Device code generated. Follow link to authenticate.'
-        : 'MCXboxBroadcast running. Check logs or open link when code appears.',
+        : 'MCXboxBroadcast is initializing. Check logs or wait a moment for the device code.',
       pendingLogin: this.pendingLogin,
     };
   }
@@ -554,6 +617,7 @@ suppress-session-update-message: false
 
     db.setSetting('broadcaster_gamertag', '');
     db.setSetting('broadcaster_xuid', '');
+    db.setSetting('broadcaster_display_pic', '');
 
     // Wipe cached token folder
     try {

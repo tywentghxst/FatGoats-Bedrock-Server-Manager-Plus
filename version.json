@@ -1,6 +1,6 @@
 {
-  "commit": "5f1fcdb",
-  "commitFull": "5f1fcdbc3e3004128c3aad3d4376634b97fed5ad",
+  "commit": "47b21b6",
+  "commitFull": "47b21b6a22ea67c1340b0808cf701f98bc7dd82a",
   "date": "Just now",
-  "subject": "fix(addons): robust Bing search with official Minecraft Marketplace support and URL decoding"
+  "subject": "fix(portal): resilient active addons resolution and interactive collapsible tile on Player Portal"
 }

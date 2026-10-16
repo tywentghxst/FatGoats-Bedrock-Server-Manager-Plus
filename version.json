@@ -1,6 +1,6 @@
 {
-  "commit": "b137d94",
-  "commitFull": "b137d94eecde49899fc92d9f29f12f8913cea132",
+  "commit": "2085d8c",
+  "commitFull": "2085d8ce5a1c18816df7146bce54758209d6c38c",
   "date": "Just now",
-  "subject": "feat(worlds): add .mcworld import, export, thumbnail icons, and world management"
+  "subject": "fix(worlds): add resilient multipart uploadMiddleware, auto-detect mcworld in addons, and API fallbacks"
 }

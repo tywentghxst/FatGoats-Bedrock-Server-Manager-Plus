@@ -41,6 +41,12 @@ async function main() {
   app.use(express.json({ limit: '100mb' }));
   app.use(express.urlencoded({ extended: true, limit: '100mb' }));
 
+  // HTTP Request Logger
+  app.use((req, res, next) => {
+    console.log(`[HTTP ${new Date().toISOString()}] ${req.method} ${req.originalUrl}`);
+    next();
+  });
+
   // Helper to safely load route modules
   function registerRoute(mountPath, moduleRelativePath) {
     try {
@@ -87,17 +93,30 @@ async function main() {
   // Serve client in production
   const clientDist = path.join(__dirname, '..', 'client', 'dist');
   if (process.env.NODE_ENV === 'production' || fs.existsSync(clientDist)) {
-    app.use(express.static(clientDist));
+    app.use(express.static(clientDist, {
+      setHeaders: (res, filePath) => {
+        if (filePath.endsWith('index.html')) {
+          res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+        }
+      }
+    }));
     app.get('*', (req, res, next) => {
       if (req.path.startsWith('/api/')) return next();
       const indexPath = path.join(clientDist, 'index.html');
       if (fs.existsSync(indexPath)) {
+        res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
         res.sendFile(indexPath);
       } else {
         res.status(404).send('Client not built. Run "npm run build".');
       }
     });
   }
+
+  // 404 catch-all for /api routes
+  app.all('/api/*', (req, res) => {
+    console.warn(`[404] Unhandled API route: ${req.method} ${req.originalUrl}`);
+    res.status(404).json({ error: `Route ${req.method} ${req.originalUrl} not found` });
+  });
 
   // Global error handler
   app.use((err, _req, res, _next) => {

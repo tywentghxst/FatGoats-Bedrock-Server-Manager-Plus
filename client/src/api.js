@@ -121,10 +121,30 @@ export const Console = {
 export const Properties = {
   get: () => request('GET', '/api/properties'),
   update: (properties) => request('PUT', '/api/properties', properties),
-  getExperiments: (worldName = '') =>
-    request('GET', `/api/properties/experiments${worldName ? `?worldName=${encodeURIComponent(worldName)}` : ''}`),
-  updateExperiments: (experiments, worldName = '') =>
-    request('PUT', '/api/properties/experiments', { experiments, worldName }),
+  getExperiments: async (worldName = '') => {
+    try {
+      return await request('GET', `/api/properties/experiments${worldName ? `?worldName=${encodeURIComponent(worldName)}` : ''}`);
+    } catch (err) {
+      if (err.status === 404) {
+        return await request('GET', `/api/worlds/experiments${worldName ? `?worldName=${encodeURIComponent(worldName)}` : ''}`);
+      }
+      throw err;
+    }
+  },
+  updateExperiments: async (experiments, worldName = '') => {
+    try {
+      return await request('PUT', '/api/properties/experiments', { experiments, worldName });
+    } catch (err) {
+      if (err.status === 404 || err.status === 405) {
+        try {
+          return await request('POST', '/api/properties/experiments', { experiments, worldName });
+        } catch (_) {
+          return await request('PUT', '/api/worlds/experiments', { experiments, worldName });
+        }
+      }
+      throw err;
+    }
+  },
 };
 
 export const Worlds = {

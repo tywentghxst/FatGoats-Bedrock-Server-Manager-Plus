@@ -2,7 +2,6 @@ import React, { useState, useEffect, useRef } from 'react';
 import api from '../api';
 import { useAuth } from '../context/AuthContext';
 import { safeCopyToClipboard } from '../utils/clipboard';
-import ServerFolders from './ServerFolders';
 
 export const Settings = () => {
   const { user, updateCredentials, isAdmin } = useAuth();
@@ -427,14 +426,6 @@ export const Settings = () => {
         </button>
         <button
           type="button"
-          className={`settings-tab-btn ${activeTab === 'folders' ? 'active' : ''}`}
-          onClick={() => setActiveTab('folders')}
-        >
-          <span className="tab-icon">📁</span>
-          <span>Server Folders &amp; Settings Changer</span>
-        </button>
-        <button
-          type="button"
           className={`settings-tab-btn ${activeTab === 'automation' ? 'active' : ''}`}
           onClick={() => setActiveTab('automation')}
         >
@@ -471,12 +462,6 @@ export const Settings = () => {
       </div>
 
       <div className={`settings-content-wrapper ${activeTab !== 'all' ? 'single-category-view' : 'settings-grid'}`}>
-        {/* CARD: SERVER FOLDERS & SETTINGS CHANGER */}
-        {(activeTab === 'folders' || activeTab === 'all') && (
-          <div className="mb-6 w-100">
-            <ServerFolders embedded={true} />
-          </div>
-        )}
 
         {/* CARD 1: ADMIN LOGIN CREDENTIALS */}
         {(activeTab === 'admin' || activeTab === 'all') && (

@@ -177,6 +177,7 @@ const PROPERTY_METADATA = {
 
 const CATEGORIES = [
   { id: 'all', label: 'All Settings', icon: '🌟' },
+  { id: 'experiments', label: 'World Experiments (Add-Ons)', icon: '🧪' },
   { id: 'general', label: 'General & Gameplay', icon: '⚔️' },
   { id: 'world', label: 'World & Simulation', icon: '🌍' },
   { id: 'security', label: 'Security & Access', icon: '🛡️' },
@@ -193,9 +194,43 @@ export const Properties = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [activeCategory, setActiveCategory] = useState('all');
 
+  // World Experiments state (for add-on support)
+  const [worldExperiments, setWorldExperiments] = useState({});
+  const [knownExperiments, setKnownExperiments] = useState([]);
+  const [targetWorld, setTargetWorld] = useState('');
+  const [activeWorld, setActiveWorld] = useState('');
+  const [availableWorlds, setAvailableWorlds] = useState([]);
+  const [experimentsLoading, setExperimentsLoading] = useState(false);
+  const [experimentsSaving, setExperimentsSaving] = useState(false);
+  const [experimentsSaveMsg, setExperimentsSaveMsg] = useState(null);
+  const [customExpKey, setCustomExpKey] = useState('');
+  const [serverRunning, setServerRunning] = useState(false);
+  const [hasLevelDat, setHasLevelDat] = useState(true);
+
   const debounceTimerRef = useRef(null);
   const propertiesRef = useRef(properties);
   propertiesRef.current = properties;
+
+  const fetchWorldExperiments = useCallback(async (worldToFetch = '') => {
+    try {
+      setExperimentsLoading(true);
+      setExperimentsSaveMsg(null);
+      const res = await api.Properties.getExperiments(worldToFetch);
+      if (res) {
+        setWorldExperiments(res.experiments || {});
+        setKnownExperiments(res.knownExperiments || []);
+        setTargetWorld(res.targetWorld || '');
+        setActiveWorld(res.activeWorld || '');
+        setAvailableWorlds(res.availableWorlds || []);
+        setServerRunning(Boolean(res.serverRunning));
+        setHasLevelDat(res.hasLevelDat !== false);
+      }
+    } catch (err) {
+      console.warn('Failed to fetch world experiments:', err);
+    } finally {
+      setExperimentsLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
     let isMounted = true;
@@ -217,7 +252,8 @@ export const Properties = () => {
     };
 
     fetchProps();
-  }, []);
+    fetchWorldExperiments();
+  }, [fetchWorldExperiments]);
 
   const saveProperties = useCallback(async (dataToSave) => {
     setSaveStatus('saving');
@@ -233,6 +269,78 @@ export const Properties = () => {
       setErrorMessage(err.message || 'Failed to save properties.');
     }
   }, []);
+
+  const handleToggleExperiment = (key, value) => {
+    setWorldExperiments((prev) => ({
+      ...prev,
+      [key]: value,
+    }));
+  };
+
+  const handleEnableAllAddonRecommended = () => {
+    const recommendedKeys = [
+      'gametest',
+      'upcoming_creator_features',
+      'experimental_molang_features',
+      'experimental_custom_biomes',
+      'data_driven_items',
+      'creator_features',
+    ];
+    setWorldExperiments((prev) => {
+      const next = { ...prev };
+      recommendedKeys.forEach((k) => {
+        next[k] = true;
+      });
+      return next;
+    });
+  };
+
+  const handleDisableAllExperiments = () => {
+    setWorldExperiments((prev) => {
+      const next = {};
+      Object.keys(prev).forEach((k) => {
+        next[k] = false;
+      });
+      return next;
+    });
+  };
+
+  const handleAddCustomExperimentTag = (e) => {
+    e.preventDefault();
+    if (!customExpKey.trim()) return;
+    const sanitizedKey = customExpKey.trim().toLowerCase().replace(/\s+/g, '_');
+    setWorldExperiments((prev) => ({
+      ...prev,
+      [sanitizedKey]: true,
+    }));
+    setCustomExpKey('');
+  };
+
+  const handleSaveExperiments = async () => {
+    if (!targetWorld) return;
+    setExperimentsSaving(true);
+    setExperimentsSaveMsg(null);
+    try {
+      const res = await api.Properties.updateExperiments(worldExperiments, targetWorld);
+      setExperimentsSaveMsg({
+        type: 'success',
+        text: res.message || `Experimental features saved for "${targetWorld}"!`,
+      });
+      if (res.data?.experiments) {
+        setWorldExperiments(res.data.experiments);
+      }
+      if (typeof res.data?.serverRunning === 'boolean') {
+        setServerRunning(res.data.serverRunning);
+      }
+    } catch (err) {
+      setExperimentsSaveMsg({
+        type: 'error',
+        text: err.message || 'Failed to update experimental features in level.dat.',
+      });
+    } finally {
+      setExperimentsSaving(false);
+    }
+  };
 
   const handlePropertyChange = (key, value) => {
     const updated = {
@@ -273,9 +381,33 @@ export const Properties = () => {
     return 'advanced';
   };
 
+  const knownKeys = new Set(knownExperiments.map((k) => k.key));
+  const customKeys = Object.keys(worldExperiments).filter(
+    (k) => !knownKeys.has(k) && k !== 'experiments_ever_used' && k !== 'saved_with_toggled_experiments'
+  );
+
+  const allDisplayExperiments = [
+    ...knownExperiments.map((k) => ({
+      ...k,
+      badgeType: k.recommendedForAddons ? 'essential' : 'gameplay',
+    })),
+    ...customKeys.map((key) => ({
+      key,
+      name: key.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()),
+      badge: 'Custom Tag',
+      badgeType: 'custom',
+      description: 'Custom experimental gameplay tag present in world level.dat.',
+    })),
+  ];
+
   const filteredKeys = allKeys.filter((key) => {
     const meta = PROPERTY_METADATA[key];
     const cat = getCategoryForProp(key);
+
+    // If experiments tab is active, standard server.properties keys are hidden
+    if (activeCategory === 'experiments') {
+      return false;
+    }
 
     // Filter by tab
     if (activeCategory !== 'all' && cat !== activeCategory) {
@@ -447,14 +579,6 @@ export const Properties = () => {
 
         {/* Save Status & Auto-save Badge */}
         <div className="header-status-group d-flex items-center gap-2">
-          <button
-            type="button"
-            className="btn btn-secondary btn-sm"
-            onClick={() => navigate('/folders')}
-            title="Open Server Directory, Worlds Folder, and Settings Changer"
-          >
-            📁 Folders &amp; Settings Changer
-          </button>
           {saveStatus === 'saving' && (
             <div className="save-badge-pill saving">
               <span className="spinner-sm"></span> Saving changes...
@@ -528,44 +652,227 @@ export const Properties = () => {
         </div>
       </div>
 
-      {/* Properties Cards Grid */}
-      {filteredKeys.length === 0 ? (
-        <div className="empty-properties-state">
-          <div className="empty-icon">🔍</div>
-          <h3>No Properties Match "{searchQuery}"</h3>
-          <p>Try searching for a different keyword or switch to the "All Settings" category tab.</p>
-        </div>
-      ) : (
-        <div className="properties-modern-grid">
-          {filteredKeys.map((key) => {
-            const meta = PROPERTY_METADATA[key];
-            const val = properties[key];
-            const icon = meta?.icon || '⚙️';
-            const label = meta?.label || key;
-            const desc = meta?.description || 'Raw dedicated server parameter in server.properties.';
-
-            return (
-              <div key={key} className="prop-modern-card">
-                <div className="prop-card-head">
-                  <div className="prop-title-flex">
-                    <span className="prop-icon-glyph">{icon}</span>
-                    <div>
-                      <h3 className="prop-display-label">{label}</h3>
-                      <span className="prop-raw-key">{key}</span>
-                    </div>
-                  </div>
-                  <span className="prop-cat-badge">{getCategoryForProp(key)}</span>
+      {/* =========================================================================
+          WORLD EXPERIMENTAL FEATURES (FOR ADD-ONS)
+          ========================================================================= */}
+      {(activeCategory === 'experiments' || activeCategory === 'all' || activeCategory === 'world') && (
+        <div className="card world-experiments-card mb-6">
+          <div className="card-header d-flex justify-between items-center flex-wrap gap-3">
+            <div className="d-flex items-center gap-2.5">
+              <span className="experiments-title-icon">🧪</span>
+              <div>
+                <div className="d-flex items-center gap-2">
+                  <h3 className="m-0 text-base font-bold text-white">World Experimental Features</h3>
+                  <span className="badge badge-emerald text-2xs uppercase tracking-wider font-mono">For Add-Ons</span>
                 </div>
-
-                <p className="prop-card-desc">{desc}</p>
-
-                <div className="prop-card-interactive">
-                  {renderControl(key, val)}
-                </div>
+                <p className="text-sub text-xs m-0 mt-0.5">
+                  Enable experimental creator toggles and scripting APIs in <code>level.dat</code>. Required for add-ons (custom entities, blocks, items, UI, and scripts).
+                </p>
               </div>
-            );
-          })}
+            </div>
+
+            {/* Target World Selector & Quick Actions */}
+            <div className="d-flex items-center gap-2 flex-wrap">
+              {availableWorlds.length > 1 && (
+                <div className="d-flex items-center gap-1.5">
+                  <span className="text-2xs text-sub uppercase font-bold">World:</span>
+                  <select
+                    className="input-modern select-xs"
+                    value={targetWorld}
+                    onChange={(e) => {
+                      setTargetWorld(e.target.value);
+                      fetchWorldExperiments(e.target.value);
+                    }}
+                  >
+                    {availableWorlds.map((w) => (
+                      <option key={w} value={w}>
+                        {w} {w === activeWorld ? '(Active in server.properties)' : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              <button
+                type="button"
+                className="btn btn-secondary btn-xs"
+                onClick={handleEnableAllAddonRecommended}
+                title="Enable all recommended creator and scripting toggles for add-ons"
+              >
+                ⚡ Enable All for Add-Ons
+              </button>
+
+              <button
+                type="button"
+                className="btn btn-secondary btn-xs"
+                onClick={handleDisableAllExperiments}
+                title="Turn off all experimental toggles"
+              >
+                Turn All Off
+              </button>
+
+              <button
+                type="button"
+                className="btn btn-primary btn-xs d-flex items-center gap-1"
+                onClick={handleSaveExperiments}
+                disabled={experimentsSaving || !hasLevelDat}
+              >
+                {experimentsSaving ? (
+                  <>
+                    <span className="spinner-sm" /> Saving...
+                  </>
+                ) : (
+                  <>
+                    <span>💾</span> Save Experiments
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+
+          <div className="card-body p-4">
+            {/* Feedback message banner */}
+            {experimentsSaveMsg && (
+              <div className={`alert-toast alert-${experimentsSaveMsg.type} mb-4`}>
+                <span className="toast-icon">
+                  {experimentsSaveMsg.type === 'success' ? '✓' : '⚠️'}
+                </span>
+                <span className="toast-text">{experimentsSaveMsg.text}</span>
+                <button
+                  type="button"
+                  className="toast-dismiss"
+                  onClick={() => setExperimentsSaveMsg(null)}
+                >
+                  ✕
+                </button>
+              </div>
+            )}
+
+            {/* Server running notice */}
+            {serverRunning && (
+              <div className="experiments-running-banner mb-4">
+                <span className="notice-icon">ℹ️</span>
+                <span className="notice-text">
+                  The server is currently running. After saving experimental features to <code>level.dat</code>, <strong>restart the server</strong> for Bedrock Dedicated Server to load them into the world.
+                </span>
+              </div>
+            )}
+
+            {!hasLevelDat ? (
+              <div className="p-4 text-center border-dashed rounded bg-darker">
+                <p className="text-secondary text-sm m-0">
+                  World <code>{targetWorld}</code> has not been generated or loaded by Bedrock yet. Start the server once with this world to generate its <code>level.dat</code> save file.
+                </p>
+              </div>
+            ) : (
+              <>
+                <div className="experiments-toggles-grid">
+                  {allDisplayExperiments.map((exp) => {
+                    const isEnabled = Boolean(worldExperiments[exp.key]);
+                    return (
+                      <div
+                        key={exp.key}
+                        className={`experiment-toggle-card ${isEnabled ? 'is-enabled' : ''}`}
+                      >
+                        <div className="d-flex items-center justify-between gap-2 mb-1.5">
+                          <div className="d-flex items-center gap-2">
+                            <span className="exp-key-tag font-mono text-2xs">{exp.key}</span>
+                            {exp.badge && (
+                              <span className={`exp-badge exp-badge-${exp.badgeType || 'recommended'}`}>
+                                {exp.badge}
+                              </span>
+                            )}
+                          </div>
+                          <label className="modern-switch-wrapper" style={{ width: 44, height: 24, margin: 0 }}>
+                            <input
+                              type="checkbox"
+                              checked={isEnabled}
+                              onChange={(e) => handleToggleExperiment(exp.key, e.target.checked)}
+                            />
+                            <span className="modern-switch-slider" style={{ borderRadius: 24 }} />
+                          </label>
+                        </div>
+
+                        <h4 className="exp-title m-0">{exp.name}</h4>
+                        <p className="exp-desc text-sub text-xs m-0 mt-1">{exp.description}</p>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Custom Experiment Tag Input */}
+                <form
+                  onSubmit={handleAddCustomExperimentTag}
+                  className="custom-exp-form mt-4 pt-3 border-t d-flex items-center gap-2 flex-wrap"
+                >
+                  <span className="text-2xs text-sub font-bold uppercase tracking-wider">
+                    Add Custom Experiment Tag:
+                  </span>
+                  <input
+                    type="text"
+                    className="input-modern input-xs"
+                    style={{ maxWidth: '240px' }}
+                    placeholder="e.g. experimental_cameras"
+                    value={customExpKey}
+                    onChange={(e) => setCustomExpKey(e.target.value)}
+                  />
+                  <button
+                    type="submit"
+                    className="btn btn-secondary btn-xs"
+                    disabled={!customExpKey.trim()}
+                  >
+                    ➕ Add Flag
+                  </button>
+                  <span className="text-2xs text-sub ml-auto">
+                    Target World: <strong>{targetWorld || activeWorld || 'Bedrock level'}</strong>
+                  </span>
+                </form>
+              </>
+            )}
+          </div>
         </div>
+      )}
+
+      {/* Properties Cards Grid */}
+      {activeCategory !== 'experiments' && (
+        filteredKeys.length === 0 ? (
+          <div className="empty-properties-state">
+            <div className="empty-icon">🔍</div>
+            <h3>No Properties Match "{searchQuery}"</h3>
+            <p>Try searching for a different keyword or switch to the "All Settings" category tab.</p>
+          </div>
+        ) : (
+          <div className="properties-modern-grid">
+            {filteredKeys.map((key) => {
+              const meta = PROPERTY_METADATA[key];
+              const val = properties[key];
+              const icon = meta?.icon || '⚙️';
+              const label = meta?.label || key;
+              const desc = meta?.description || 'Raw dedicated server parameter in server.properties.';
+
+              return (
+                <div key={key} className="prop-modern-card">
+                  <div className="prop-card-head">
+                    <div className="prop-title-flex">
+                      <span className="prop-icon-glyph">{icon}</span>
+                      <div>
+                        <h3 className="prop-display-label">{label}</h3>
+                        <span className="prop-raw-key">{key}</span>
+                      </div>
+                    </div>
+                    <span className="prop-cat-badge">{getCategoryForProp(key)}</span>
+                  </div>
+
+                  <p className="prop-card-desc">{desc}</p>
+
+                  <div className="prop-card-interactive">
+                    {renderControl(key, val)}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )
       )}
     </div>
   );

@@ -79,7 +79,6 @@ async function main() {
   registerRoute('/api/tunnel',     './routes/tunnel');
   registerRoute('/api/tray',       './routes/tray');
   registerRoute('/api/updates',    './routes/updates');
-  registerRoute('/api/folders',    './routes/folders');
 
   // Start auto-backup scheduler
   const backupService = require('./services/backupService');

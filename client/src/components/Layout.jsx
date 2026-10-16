@@ -147,7 +147,6 @@ export const Layout = () => {
     if (path.startsWith('/players')) return 'Players & Permissions';
     if (path.startsWith('/console')) return 'Live Console';
     if (path.startsWith('/properties')) return 'Server Properties';
-    if (path.startsWith('/folders')) return 'Server Folders & Settings Changer';
     if (path.startsWith('/worlds')) return 'Worlds & Saves';
     if (path.startsWith('/backups')) return 'Backup Archives';
     if (path.startsWith('/addons')) return 'Add-ons & Mods';
@@ -229,16 +228,6 @@ export const Layout = () => {
               >
                 <span className="nav-icon">⚙️</span>
                 <span className="nav-text">Server Properties</span>
-              </NavLink>
-
-              <NavLink
-                to="/folders"
-                className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}
-                onClick={closeSidebarOnNav}
-              >
-                <span className="nav-icon">📁</span>
-                <span className="nav-text">Folders &amp; Settings</span>
-                <span className="nav-badge-pill" style={{ background: '#0284c7', color: '#fff' }}>New</span>
               </NavLink>
 
               <NavLink

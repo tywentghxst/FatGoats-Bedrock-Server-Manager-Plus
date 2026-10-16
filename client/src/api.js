@@ -109,6 +109,10 @@ export const Console = {
 export const Properties = {
   get: () => request('GET', '/api/properties'),
   update: (properties) => request('PUT', '/api/properties', properties),
+  getExperiments: (worldName = '') =>
+    request('GET', `/api/properties/experiments${worldName ? `?worldName=${encodeURIComponent(worldName)}` : ''}`),
+  updateExperiments: (experiments, worldName = '') =>
+    request('PUT', '/api/properties/experiments', { experiments, worldName }),
 };
 
 export const Worlds = {
@@ -229,21 +233,6 @@ export const Updates = {
   apply: () => request('POST', '/api/updates/apply'),
 };
 
-export const Folders = {
-  get: () => request('GET', '/api/folders'),
-  validatePath: (folderPath) => request('POST', '/api/folders/validate-path', { folderPath }),
-  setBdsDir: (folderPath, createIfMissing = false) => request('POST', '/api/folders/set-bds-dir', { folderPath, createIfMissing }),
-  resetBdsDir: () => request('POST', '/api/folders/reset-bds-dir'),
-  setWorldsDir: (folderPath, createIfMissing = false) => request('POST', '/api/folders/set-worlds-dir', { folderPath, createIfMissing }),
-  resetWorldsDir: () => request('POST', '/api/folders/reset-worlds-dir'),
-  createWorld: (worldName, setActive = false, gameMode = '', seed = '') =>
-    request('POST', '/api/folders/create-world', { worldName, setActive, gameMode, seed }),
-  createFolder: (parent = 'bds', folderName = '') =>
-    request('POST', '/api/folders/create-folder', { parent, folderName }),
-  openExplorer: (target = 'bds') => request('POST', '/api/folders/open-explorer', { target }),
-  updateSettings: (properties) => request('PUT', '/api/folders/settings-changer', { properties }),
-};
-
 const api = {
   setToken,
   getToken,
@@ -266,7 +255,6 @@ const api = {
   Xbox,
   Tunnel,
   Updates,
-  Folders,
 
   // Top-level aliases for flexibility
   login: Auth.login,

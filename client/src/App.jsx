@@ -20,12 +20,11 @@ import Versions from './pages/Versions';
 import Audit from './pages/Audit';
 import PlayerPortal from './pages/PlayerPortal';
 import XboxLive from './pages/XboxLive';
-import ServerFolders from './pages/ServerFolders';
 
 const RESERVED_PATHS = [
   'login', 'register', 'players', 'console', 'xbox',
   'properties', 'worlds', 'backups', 'addons', 'users',
-  'settings', 'versions', 'audit', 'api', 'folders'
+  'settings', 'versions', 'audit', 'api'
 ];
 
 const DynamicPortalRoute = () => {
@@ -79,14 +78,6 @@ export const App = () => {
               element={
                 <ProtectedRoute requireAdmin>
                   <Worlds />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="folders"
-              element={
-                <ProtectedRoute requireAdmin>
-                  <ServerFolders />
                 </ProtectedRoute>
               }
             />

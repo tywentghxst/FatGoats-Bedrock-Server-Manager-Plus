@@ -1,6 +1,6 @@
 {
-  "commit": "a05586b",
-  "commitFull": "a05586b2d2de0d241296b967659b7830c7f4697e",
+  "commit": "735123e",
+  "commitFull": "735123ec1ef710a30b42c67feff9d8ff76cf137d",
   "date": "Just now",
-  "subject": "fix(addons): remove automatic Addon Source URL & Metadata Finder modal when adding new addons"
+  "subject": "feat(properties): add World Experimental Features for add-on support and remove Folders & Settings"
 }

@@ -1,6 +1,6 @@
 {
-  "commit": "7ee396b",
-  "commitFull": "7ee396b692abfe14e561268f1e5b997ea7e02384",
+  "commit": "a05586b",
+  "commitFull": "a05586b2d2de0d241296b967659b7830c7f4697e",
   "date": "Just now",
-  "subject": "feat(folders): add Server Folders & Settings Changer to inspect, change, and add folders for server.properties and worlds"
+  "subject": "fix(addons): remove automatic Addon Source URL & Metadata Finder modal when adding new addons"
 }

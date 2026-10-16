@@ -307,16 +307,12 @@ export const Addons = () => {
 
     let successCount = 0;
     const errors = [];
-    const allProcessed = [];
 
     for (let i = 0; i < validFiles.length; i++) {
       const file = validFiles[i];
       try {
-        const res = await api.Addons.upload(file);
+        await api.Addons.upload(file);
         successCount++;
-        if (res && res.addons && Array.isArray(res.addons)) {
-          allProcessed.push(...res.addons);
-        }
       } catch (err) {
         console.error(`Failed to upload ${file.name}:`, err);
         errors.push(`${file.name}: ${err.message || 'Upload failed'}`);
@@ -336,22 +332,6 @@ export const Addons = () => {
     await loadData();
     if (engineMode === 'diagnostics') {
       runDiagnostics();
-    }
-
-    // Launch URL Search Wizard for newly added packs
-    if (allProcessed.length > 0) {
-      const queue = [];
-      const seenKeys = new Set();
-      for (const addon of allProcessed) {
-        const key = addon.groupId || addon.uuid;
-        if (!seenKeys.has(key)) {
-          seenKeys.add(key);
-          queue.push(addon);
-        }
-      }
-      if (queue.length > 0) {
-        startUrlWizard(queue);
-      }
     }
   };
 

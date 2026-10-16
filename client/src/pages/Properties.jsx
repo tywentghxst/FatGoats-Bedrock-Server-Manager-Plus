@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import api from '../api';
 
 const PROPERTY_METADATA = {
@@ -184,6 +185,7 @@ const CATEGORIES = [
 ];
 
 export const Properties = () => {
+  const navigate = useNavigate();
   const [properties, setProperties] = useState({});
   const [loading, setLoading] = useState(true);
   const [saveStatus, setSaveStatus] = useState('idle'); // 'idle' | 'saving' | 'saved' | 'error'
@@ -444,7 +446,15 @@ export const Properties = () => {
         </div>
 
         {/* Save Status & Auto-save Badge */}
-        <div className="header-status-group">
+        <div className="header-status-group d-flex items-center gap-2">
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            onClick={() => navigate('/folders')}
+            title="Open Server Directory, Worlds Folder, and Settings Changer"
+          >
+            📁 Folders &amp; Settings Changer
+          </button>
           {saveStatus === 'saving' && (
             <div className="save-badge-pill saving">
               <span className="spinner-sm"></span> Saving changes...

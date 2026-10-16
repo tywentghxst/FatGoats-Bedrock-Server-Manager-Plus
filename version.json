@@ -1,6 +1,6 @@
 {
-  "commit": "1c5c518",
-  "commitFull": "1c5c5182b261d984418e16539cbb3e15205497f9",
+  "commit": "7ee396b",
+  "commitFull": "7ee396b692abfe14e561268f1e5b997ea7e02384",
   "date": "Just now",
-  "subject": "feat(portal): display online players by name and Minecraft skin face avatar on Player Quick-Start Portal"
+  "subject": "feat(folders): add Server Folders & Settings Changer to inspect, change, and add folders for server.properties and worlds"
 }

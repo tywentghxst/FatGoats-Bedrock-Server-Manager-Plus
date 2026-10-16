@@ -1,21 +1,33 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import api from '../api';
 import { useAuth } from '../context/AuthContext';
+import { safeCopyToClipboard } from '../utils/clipboard';
 
 export const Worlds = () => {
+  const navigate = useNavigate();
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
 
   const [worlds, setWorlds] = useState([]);
   const [activeWorld, setActiveWorld] = useState('');
+  const [worldsDir, setWorldsDir] = useState('');
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
   const [error, setError] = useState(null);
   const [successMsg, setSuccessMsg] = useState(null);
+  const [copiedDir, setCopiedDir] = useState(false);
 
   // Modal confirmation state
   const [deleteModalTarget, setDeleteModalTarget] = useState(null);
   const [activeModalTarget, setActiveModalTarget] = useState(null);
+
+  // Add World Folder Modal
+  const [showAddWorldModal, setShowAddWorldModal] = useState(false);
+  const [newWorldName, setNewWorldName] = useState('');
+  const [setNewWorldActive, setSetNewWorldActive] = useState(true);
+  const [newWorldGameMode, setNewWorldGameMode] = useState('survival');
+  const [newWorldSeed, setNewWorldSeed] = useState('');
 
   const formatSize = (bytes) => {
     if (!bytes || isNaN(bytes)) return '0 B';
@@ -33,20 +45,30 @@ export const Worlds = () => {
     setLoading(true);
     setError(null);
     try {
-      const data = await api.Worlds.list();
-      // data might be { worlds: [...], activeWorld: 'Bedrock level' } or an array
-      if (Array.isArray(data)) {
-        setWorlds(data);
-        const active = data.find((w) => w.isActive || w.active);
-        if (active) setActiveWorld(active.name);
-      } else if (data && typeof data === 'object') {
-        const list = data.worlds || [];
-        setWorlds(list);
-        if (data.activeWorld) {
-          setActiveWorld(data.activeWorld);
-        } else {
-          const active = list.find((w) => w.isActive || w.active);
+      const [data, folderData] = await Promise.allSettled([
+        api.Worlds.list(),
+        api.Folders.get(),
+      ]);
+
+      if (folderData.status === 'fulfilled' && folderData.value?.worldsDir) {
+        setWorldsDir(folderData.value.worldsDir);
+      }
+
+      if (data.status === 'fulfilled') {
+        const val = data.value;
+        if (Array.isArray(val)) {
+          setWorlds(val);
+          const active = val.find((w) => w.isActive || w.active);
           if (active) setActiveWorld(active.name);
+        } else if (val && typeof val === 'object') {
+          const list = val.worlds || [];
+          setWorlds(list);
+          if (val.activeWorld) {
+            setActiveWorld(val.activeWorld);
+          } else {
+            const active = list.find((w) => w.isActive || w.active);
+            if (active) setActiveWorld(active.name);
+          }
         }
       }
     } catch (err) {
@@ -56,6 +78,30 @@ export const Worlds = () => {
       setLoading(false);
     }
   }, []);
+
+  const handleCreateWorldFolder = async (e) => {
+    e.preventDefault();
+    if (!newWorldName.trim()) return;
+    setActionLoading(true);
+    setError(null);
+    try {
+      const res = await api.Folders.createWorld(
+        newWorldName.trim(),
+        setNewWorldActive,
+        newWorldGameMode,
+        newWorldSeed.trim()
+      );
+      setSuccessMsg(res.message || `World folder "${newWorldName}" created!`);
+      setShowAddWorldModal(false);
+      setNewWorldName('');
+      setNewWorldSeed('');
+      await loadWorlds();
+    } catch (err) {
+      setError(err.message || 'Failed to create world folder.');
+    } finally {
+      setActionLoading(false);
+    }
+  };
 
   useEffect(() => {
     loadWorlds();
@@ -112,7 +158,26 @@ export const Worlds = () => {
           <h1 className="page-title">World Management</h1>
           <p className="page-subtitle">Configure, inspect, and switch active Bedrock worlds</p>
         </div>
-        <div className="header-actions">
+        <div className="header-actions d-flex gap-2">
+          {isAdmin && (
+            <>
+              <button
+                type="button"
+                className="btn btn-success"
+                onClick={() => setShowAddWorldModal(true)}
+              >
+                ➕ Add World Folder
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => navigate('/folders')}
+                title="Manage server directories and settings"
+              >
+                📁 Folders &amp; Settings
+              </button>
+            </>
+          )}
           <button
             type="button"
             className="btn btn-secondary"
@@ -137,6 +202,52 @@ export const Worlds = () => {
           <span className="toast-icon">✓</span>
           <div className="toast-content">{successMsg}</div>
           <button type="button" className="toast-close" onClick={() => setSuccessMsg(null)}>✕</button>
+        </div>
+      )}
+
+      {/* Worlds Directory Path Banner */}
+      {worldsDir && (
+        <div className="card folder-path-banner-card mb-5">
+          <div className="card-body p-3 d-flex items-center justify-between flex-wrap gap-2">
+            <div className="d-flex items-center gap-2">
+              <span className="folder-icon text-lg">📁</span>
+              <div>
+                <span className="text-2xs text-sub font-bold uppercase tracking-wider d-block">Worlds Directory Path</span>
+                <code className="text-xs text-emerald font-mono">{worldsDir}</code>
+              </div>
+            </div>
+            <div className="d-flex items-center gap-1.5">
+              <button
+                type="button"
+                className="btn btn-secondary btn-xs"
+                onClick={() => {
+                  safeCopyToClipboard(worldsDir);
+                  setCopiedDir(true);
+                  setTimeout(() => setCopiedDir(false), 2000);
+                }}
+              >
+                {copiedDir ? '✓ Copied' : '📋 Copy'}
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary btn-xs"
+                onClick={async () => {
+                  try {
+                    await api.Folders.openExplorer('worlds');
+                  } catch (_) {}
+                }}
+              >
+                📂 Explorer
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary btn-xs"
+                onClick={() => navigate('/folders')}
+              >
+                ⚙️ Change Folder
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -368,6 +479,95 @@ export const Worlds = () => {
                 {actionLoading ? 'Updating...' : 'Confirm & Switch'}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Add New World Folder Modal */}
+      {showAddWorldModal && (
+        <div className="modal-overlay" onClick={() => setShowAddWorldModal(false)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
+            <div className="modal-header">
+              <h3 className="modal-title">➕ Add New World Folder</h3>
+              <button
+                type="button"
+                className="modal-close-btn"
+                onClick={() => setShowAddWorldModal(false)}
+              >
+                ✕
+              </button>
+            </div>
+            <form onSubmit={handleCreateWorldFolder}>
+              <div className="modal-body">
+                <p className="text-secondary text-xs mb-3">
+                  Creates a new world folder in <code>{worldsDir || 'worlds/'}</code> and optionally switches active level in <code>server.properties</code>.
+                </p>
+
+                <div className="form-group mb-3">
+                  <label className="form-label text-xs">World Folder Name:</label>
+                  <input
+                    type="text"
+                    className="input-modern"
+                    value={newWorldName}
+                    onChange={(e) => setNewWorldName(e.target.value)}
+                    placeholder="e.g. MyNewWorld, Survival2026, AdventureZone"
+                    required
+                    autoFocus
+                  />
+                </div>
+
+                <div className="form-group mb-3">
+                  <label className="form-label text-xs">Game Mode:</label>
+                  <select
+                    className="input-modern"
+                    value={newWorldGameMode}
+                    onChange={(e) => setNewWorldGameMode(e.target.value)}
+                  >
+                    <option value="survival">Survival</option>
+                    <option value="creative">Creative</option>
+                    <option value="adventure">Adventure</option>
+                  </select>
+                </div>
+
+                <div className="form-group mb-3">
+                  <label className="form-label text-xs">Generation Seed (Optional):</label>
+                  <input
+                    type="text"
+                    className="input-modern"
+                    value={newWorldSeed}
+                    onChange={(e) => setNewWorldSeed(e.target.value)}
+                    placeholder="Leave blank for random world seed"
+                  />
+                </div>
+
+                <label className="checkbox-label text-xs d-flex items-center gap-2 mt-2">
+                  <input
+                    type="checkbox"
+                    checked={setNewWorldActive}
+                    onChange={(e) => setSetNewWorldActive(e.target.checked)}
+                  />
+                  <span>Immediately set as active world (<code>level-name</code> in server.properties)</span>
+                </label>
+              </div>
+
+              <div className="modal-footer">
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => setShowAddWorldModal(false)}
+                  disabled={actionLoading}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="btn btn-success"
+                  disabled={actionLoading || !newWorldName.trim()}
+                >
+                  {actionLoading ? 'Creating...' : '➕ Create World Folder'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

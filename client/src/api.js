@@ -276,6 +276,8 @@ const api = {
 
   getProperties: Properties.get,
   updateProperties: Properties.update,
+  getExperiments: Properties.getExperiments,
+  updateExperiments: Properties.updateExperiments,
 
   listWorlds: Worlds.list,
   setActiveWorld: Worlds.setActive,

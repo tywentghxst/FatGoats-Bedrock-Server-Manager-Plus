@@ -1,6 +1,6 @@
 {
-  "commit": "735123e",
-  "commitFull": "735123ec1ef710a30b42c67feff9d8ff76cf137d",
+  "commit": "8540d6f",
+  "commitFull": "8540d6f2992c690a0db210fe90eb4bb944110624",
   "date": "Just now",
-  "subject": "feat(properties): add World Experimental Features for add-on support and remove Folders & Settings"
+  "subject": "fix(properties): auto-save world experiments on toggle and provide restart button"
 }

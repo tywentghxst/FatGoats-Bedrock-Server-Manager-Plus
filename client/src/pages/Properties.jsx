@@ -207,21 +207,29 @@ export const Properties = () => {
   const [serverRunning, setServerRunning] = useState(false);
   const [hasLevelDat, setHasLevelDat] = useState(true);
 
+  const [isRestartingServer, setIsRestartingServer] = useState(false);
+
   const debounceTimerRef = useRef(null);
   const propertiesRef = useRef(properties);
   propertiesRef.current = properties;
+
+  const expDebounceTimerRef = useRef(null);
+  const worldExperimentsRef = useRef(worldExperiments);
+  worldExperimentsRef.current = worldExperiments;
 
   const fetchWorldExperiments = useCallback(async (worldToFetch = '') => {
     try {
       setExperimentsLoading(true);
       setExperimentsSaveMsg(null);
-      const res = await api.Properties.getExperiments(worldToFetch);
+      const getExpFn = api.getExperiments || api.Properties?.getExperiments;
+      const res = await getExpFn(worldToFetch);
       if (res) {
         setWorldExperiments(res.experiments || {});
         setKnownExperiments(res.knownExperiments || []);
-        setTargetWorld(res.targetWorld || '');
-        setActiveWorld(res.activeWorld || '');
-        setAvailableWorlds(res.availableWorlds || []);
+        const chosenWorld = res.targetWorld || res.activeWorld || worldToFetch || 'Bedrock level';
+        setTargetWorld(chosenWorld);
+        setActiveWorld(res.activeWorld || chosenWorld);
+        setAvailableWorlds(res.availableWorlds || [chosenWorld]);
         setServerRunning(Boolean(res.serverRunning));
         setHasLevelDat(res.hasLevelDat !== false);
       }
@@ -270,11 +278,54 @@ export const Properties = () => {
     }
   }, []);
 
+  const saveExperimentsToWorld = useCallback(async (experimentsToSave, worldName) => {
+    const chosenWorld = worldName || targetWorld || activeWorld || properties['level-name'] || 'Bedrock level';
+    setExperimentsSaving(true);
+    setSaveStatus('saving');
+    try {
+      const updateExpFn = api.updateExperiments || api.Properties?.updateExperiments;
+      const res = await updateExpFn(experimentsToSave, chosenWorld);
+      setSaveStatus('saved');
+      setExperimentsSaveMsg({
+        type: 'success',
+        text: res.message || `Experimental features saved for "${chosenWorld}"!`,
+      });
+      if (res.data?.experiments) {
+        setWorldExperiments(res.data.experiments);
+      }
+      if (typeof res.data?.serverRunning === 'boolean') {
+        setServerRunning(res.data.serverRunning);
+      }
+      setTimeout(() => {
+        setSaveStatus((current) => (current === 'saved' ? 'idle' : current));
+      }, 3000);
+      return res;
+    } catch (err) {
+      setSaveStatus('error');
+      setExperimentsSaveMsg({
+        type: 'error',
+        text: err.message || 'Failed to update experimental features in level.dat.',
+      });
+      throw err;
+    } finally {
+      setExperimentsSaving(false);
+    }
+  }, [targetWorld, activeWorld, properties]);
+
   const handleToggleExperiment = (key, value) => {
-    setWorldExperiments((prev) => ({
-      ...prev,
+    const updated = {
+      ...worldExperimentsRef.current,
       [key]: value,
-    }));
+    };
+    setWorldExperiments(updated);
+
+    if (expDebounceTimerRef.current) {
+      clearTimeout(expDebounceTimerRef.current);
+    }
+
+    expDebounceTimerRef.current = setTimeout(() => {
+      saveExperimentsToWorld(updated, targetWorld).catch((e) => console.warn(e));
+    }, 600);
   };
 
   const handleEnableAllAddonRecommended = () => {
@@ -286,59 +337,73 @@ export const Properties = () => {
       'data_driven_items',
       'creator_features',
     ];
-    setWorldExperiments((prev) => {
-      const next = { ...prev };
-      recommendedKeys.forEach((k) => {
-        next[k] = true;
-      });
-      return next;
+    const updated = { ...worldExperimentsRef.current };
+    recommendedKeys.forEach((k) => {
+      updated[k] = true;
     });
+    setWorldExperiments(updated);
+
+    if (expDebounceTimerRef.current) {
+      clearTimeout(expDebounceTimerRef.current);
+    }
+    saveExperimentsToWorld(updated, targetWorld).catch((e) => console.warn(e));
   };
 
   const handleDisableAllExperiments = () => {
-    setWorldExperiments((prev) => {
-      const next = {};
-      Object.keys(prev).forEach((k) => {
-        next[k] = false;
-      });
-      return next;
+    const updated = {};
+    Object.keys(worldExperimentsRef.current).forEach((k) => {
+      updated[k] = false;
     });
+    setWorldExperiments(updated);
+
+    if (expDebounceTimerRef.current) {
+      clearTimeout(expDebounceTimerRef.current);
+    }
+    saveExperimentsToWorld(updated, targetWorld).catch((e) => console.warn(e));
   };
 
   const handleAddCustomExperimentTag = (e) => {
     e.preventDefault();
     if (!customExpKey.trim()) return;
     const sanitizedKey = customExpKey.trim().toLowerCase().replace(/\s+/g, '_');
-    setWorldExperiments((prev) => ({
-      ...prev,
+    const updated = {
+      ...worldExperimentsRef.current,
       [sanitizedKey]: true,
-    }));
+    };
+    setWorldExperiments(updated);
     setCustomExpKey('');
+
+    if (expDebounceTimerRef.current) {
+      clearTimeout(expDebounceTimerRef.current);
+    }
+    saveExperimentsToWorld(updated, targetWorld).catch((e) => console.warn(e));
   };
 
   const handleSaveExperiments = async () => {
-    if (!targetWorld) return;
-    setExperimentsSaving(true);
-    setExperimentsSaveMsg(null);
+    if (expDebounceTimerRef.current) {
+      clearTimeout(expDebounceTimerRef.current);
+    }
+    await saveExperimentsToWorld(worldExperimentsRef.current, targetWorld).catch((e) => console.warn(e));
+  };
+
+  const handleRestartServerFromExperiments = async () => {
+    setIsRestartingServer(true);
     try {
-      const res = await api.Properties.updateExperiments(worldExperiments, targetWorld);
+      await api.restart();
       setExperimentsSaveMsg({
         type: 'success',
-        text: res.message || `Experimental features saved for "${targetWorld}"!`,
+        text: 'Bedrock Server restart signal sent! Reloading world with new experimental features...',
       });
-      if (res.data?.experiments) {
-        setWorldExperiments(res.data.experiments);
-      }
-      if (typeof res.data?.serverRunning === 'boolean') {
-        setServerRunning(res.data.serverRunning);
-      }
+      setTimeout(() => {
+        fetchWorldExperiments(targetWorld);
+        setIsRestartingServer(false);
+      }, 3500);
     } catch (err) {
       setExperimentsSaveMsg({
         type: 'error',
-        text: err.message || 'Failed to update experimental features in level.dat.',
+        text: `Failed to restart server: ${err.message || 'Unknown error'}`,
       });
-    } finally {
-      setExperimentsSaving(false);
+      setIsRestartingServer(false);
     }
   };
 
@@ -750,11 +815,32 @@ export const Properties = () => {
 
             {/* Server running notice */}
             {serverRunning && (
-              <div className="experiments-running-banner mb-4">
-                <span className="notice-icon">ℹ️</span>
-                <span className="notice-text">
-                  The server is currently running. After saving experimental features to <code>level.dat</code>, <strong>restart the server</strong> for Bedrock Dedicated Server to load them into the world.
-                </span>
+              <div className="experiments-running-banner mb-4 d-flex items-center justify-between gap-3 flex-wrap">
+                <div className="d-flex items-center gap-2">
+                  <span className="notice-icon">ℹ️</span>
+                  <span className="notice-text">
+                    The server is currently running. Bedrock Dedicated Server loads changes to <code>level.dat</code> upon startup. Restart the server when you are ready to apply these experiments.
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  className="btn btn-warning btn-sm d-flex items-center gap-1.5"
+                  onClick={handleRestartServerFromExperiments}
+                  disabled={isRestartingServer}
+                  style={{ whiteSpace: 'nowrap', padding: '0.35rem 0.75rem', fontSize: '0.8rem', fontWeight: 600 }}
+                >
+                  {isRestartingServer ? (
+                    <>
+                      <span className="spinner-border spinner-border-sm" role="status" aria-hidden="true" style={{ width: '0.85rem', height: '0.85rem' }} />
+                      <span>Restarting...</span>
+                    </>
+                  ) : (
+                    <>
+                      <span>🔄</span>
+                      <span>Restart Server to Apply</span>
+                    </>
+                  )}
+                </button>
               </div>
             )}
 

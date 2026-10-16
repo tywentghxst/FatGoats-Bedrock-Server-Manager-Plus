@@ -235,11 +235,20 @@ async function importWorld(filePath, originalFilename = '', options = {}) {
 
   try {
     // 1. Extract uploaded archive
-    const zipStream = fs.createReadStream(filePath).pipe(unzipper.Extract({ path: tempExtractDir }));
-    await new Promise((resolve, reject) => {
-      zipStream.on('close', resolve);
-      zipStream.on('error', reject);
-    });
+    try {
+      const zipArchive = await unzipper.Open.file(filePath);
+      await zipArchive.extract({ path: tempExtractDir });
+    } catch (zipErr) {
+      console.warn('[WorldService] Open.file extraction failed, trying stream extract:', zipErr.message);
+      const readStream = fs.createReadStream(filePath);
+      const extractStream = unzipper.Extract({ path: tempExtractDir });
+      await new Promise((resolve, reject) => {
+        readStream.on('error', reject);
+        extractStream.on('close', resolve);
+        extractStream.on('error', reject);
+        readStream.pipe(extractStream);
+      });
+    }
 
     // 2. Discover the world root containing level.dat
     const worldRoot = findWorldRoot(tempExtractDir);

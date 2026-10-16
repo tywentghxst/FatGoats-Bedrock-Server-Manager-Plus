@@ -34,13 +34,8 @@ const storage = multer.diskStorage({
 });
 
 const fileFilter = (req, file, cb) => {
-  const allowedExts = ['.mcworld', '.zip'];
-  const ext = path.extname(file.originalname).toLowerCase();
-  if (allowedExts.includes(ext)) {
-    cb(null, true);
-  } else {
-    cb(new Error(`Invalid world file type "${ext}". Allowed formats: .mcworld, .zip`));
-  }
+  // Allow all uploads through so mobile browser renames (.bin, etc.) are handled gracefully by worldService
+  cb(null, true);
 };
 
 const upload = multer({
@@ -141,6 +136,7 @@ const uploadMiddleware = (req, res, next) => {
  * Upload and extract a .mcworld or .zip world archive
  */
 const handleImportWorld = async (req, res) => {
+  console.log('[WorldsRoute] Import request received, method:', req.method, 'path:', req.path, 'file:', req.file?.originalname, 'size:', req.file?.size);
   if (!req.file) {
     return res.status(400).json({ error: 'No world file was uploaded (.mcworld or .zip required).' });
   }
@@ -184,16 +180,10 @@ const handleImportWorld = async (req, res) => {
 
 router.post('/import', authenticate, requireAdmin, uploadMiddleware, handleImportWorld);
 router.post('/upload', authenticate, requireAdmin, uploadMiddleware, handleImportWorld);
-router.post('/', (req, res, next) => {
-  if (req.is('multipart/form-data')) {
-    return authenticate(req, res, () =>
-      requireAdmin(req, res, () =>
-        uploadMiddleware(req, res, () => handleImportWorld(req, res))
-      )
-    );
-  }
-  next();
-});
+router.post('/', authenticate, requireAdmin, uploadMiddleware, handleImportWorld);
+router.put('/import', authenticate, requireAdmin, uploadMiddleware, handleImportWorld);
+router.put('/upload', authenticate, requireAdmin, uploadMiddleware, handleImportWorld);
+router.put('/', authenticate, requireAdmin, uploadMiddleware, handleImportWorld);
 
 /**
  * POST /active

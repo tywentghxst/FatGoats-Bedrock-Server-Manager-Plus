@@ -4,6 +4,32 @@ import api from '../api';
 import { useAuth } from '../context/AuthContext';
 import { safeCopyToClipboard } from '../utils/clipboard';
 
+export const PlayerSkinAvatar = ({ name, size = 44 }) => {
+  const [srcIndex, setSrcIndex] = useState(0);
+  const sources = [
+    `https://mc-heads.net/avatar/${encodeURIComponent(name)}/${size}`,
+    `https://minotar.net/helm/${encodeURIComponent(name)}/${size}`,
+    `https://avatar.xboxlive.com/avatar/${encodeURIComponent(name)}/avatarpic-l.png`,
+    `https://mc-heads.net/avatar/MHF_Steve/${size}`,
+  ];
+
+  return (
+    <div className="portal-player-skin-wrap" style={{ width: size, height: size }}>
+      <img
+        src={sources[srcIndex]}
+        alt={name}
+        className="portal-player-skin-img"
+        onError={() => {
+          if (srcIndex < sources.length - 1) {
+            setSrcIndex((prev) => prev + 1);
+          }
+        }}
+      />
+      <span className="portal-player-skin-dot" title="Online in world" />
+    </div>
+  );
+};
+
 export const PlayerPortal = () => {
   const { user, login, isAuthenticated } = useAuth();
   const navigate = useNavigate();
@@ -264,14 +290,27 @@ export const PlayerPortal = () => {
             <>
               {/* Dynamic Modular Sections rendered in user-configured order */}
               {(() => {
-                const configuredSections = (status?.sections && Array.isArray(status.sections) && status.sections.length > 0)
-                  ? status.sections
+                const onlinePlayers = status?.onlinePlayers || status?.players || [];
+
+                let configuredSections = (status?.sections && Array.isArray(status.sections) && status.sections.length > 0)
+                  ? [...status.sections]
                   : [
                       { id: 'server_status', enabled: true },
+                      { id: 'online_players', enabled: true },
                       { id: 'direct_ip', enabled: true },
                       { id: 'xbox_bot', enabled: true },
                       { id: 'installed_addons', enabled: true },
                     ];
+
+                // Auto-include online_players section if missing from saved config
+                if (!configuredSections.some((s) => s.id === 'online_players')) {
+                  const sIdx = configuredSections.findIndex((s) => s.id === 'server_status');
+                  if (sIdx !== -1) {
+                    configuredSections.splice(sIdx + 1, 0, { id: 'online_players', enabled: true });
+                  } else {
+                    configuredSections.unshift({ id: 'online_players', enabled: true });
+                  }
+                }
 
                 const renderSection = (id) => {
                   if (id === 'server_status') {
@@ -292,11 +331,38 @@ export const PlayerPortal = () => {
                             </span>
                             {isRunning && (
                               <span className="portal-player-count">
-                                • {status?.playerCount ?? 0} / {status?.maxPlayers ?? 10} Players Active
+                                • {onlinePlayers.length || status?.playerCount || 0} / {status?.maxPlayers ?? 10} Players Active
                               </span>
                             )}
                           </div>
                         </div>
+
+                        {/* Live Online Players Strip by Name & Skin Face */}
+                        {isRunning && (
+                          <div className="portal-status-online-players mt-3">
+                            {onlinePlayers.length > 0 ? (
+                              <div className="portal-online-players-strip">
+                                <div className="portal-online-players-label mb-2 d-flex items-center gap-1.5">
+                                  <span className="pulse-dot-green" />
+                                  <span className="text-xs font-bold text-white">Online In World ({onlinePlayers.length}):</span>
+                                </div>
+                                <div className="portal-online-chips-row">
+                                  {onlinePlayers.map((player) => (
+                                    <div key={player.name} className="portal-player-online-chip" title={`${player.name} is in-game`}>
+                                      <PlayerSkinAvatar name={player.name} size={28} />
+                                      <span className="portal-chip-name">{player.name}</span>
+                                      {player.isOp && <span className="portal-chip-op-crown" title="Operator">👑</span>}
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="portal-online-players-empty-strip">
+                                <span>👥 0 players currently in world</span>
+                              </div>
+                            )}
+                          </div>
+                        )}
 
                         {/* Notification Banner */}
                         {actionMessage && (
@@ -366,6 +432,73 @@ export const PlayerPortal = () => {
                             <span className="btn-portal-label">Restart All</span>
                             <span className="btn-portal-sub">Reboot All Services</span>
                           </button>
+                        </div>
+                      </div>
+                    );
+                  }
+
+                  if (id === 'online_players') {
+                    return (
+                      <div key="online_players" className="portal-section-block portal-online-players-section mt-4">
+                        <div className="portal-tunnel-card portal-online-players-card">
+                          <div className="portal-tunnel-header d-flex items-center justify-between">
+                            <div className="d-flex items-center gap-2">
+                              <span className="portal-tunnel-logo">👥</span>
+                              <div>
+                                <div className="d-flex items-center gap-2">
+                                  <h3 className="portal-tunnel-title m-0">Players Online</h3>
+                                  <span className={`portal-badge ${isRunning && onlinePlayers.length > 0 ? 'portal-badge-live' : 'portal-badge-count'}`}>
+                                    {isRunning ? `${onlinePlayers.length} Active` : 'Offline'}
+                                  </span>
+                                </div>
+                                <p className="portal-tunnel-desc m-0 mt-0.5">
+                                  Live connected players in the active Minecraft Bedrock world
+                                </p>
+                              </div>
+                            </div>
+
+                            {isRunning && onlinePlayers.length > 0 && (
+                              <div className="portal-pulse-live-indicator">
+                                <span className="pulse-dot-green" />
+                                <span className="portal-live-text font-mono font-bold text-emerald text-xs">LIVE IN-GAME</span>
+                              </div>
+                            )}
+                          </div>
+
+                          {!isRunning ? (
+                            <div className="portal-no-players-box text-center p-4">
+                              <span className="portal-empty-icon">⚪</span>
+                              <p className="text-sub text-xs m-0 mt-1">Server is currently offline. Start the server above to view live players.</p>
+                            </div>
+                          ) : onlinePlayers.length === 0 ? (
+                            <div className="portal-no-players-box text-center p-4">
+                              <span className="portal-empty-icon">🎮</span>
+                              <p className="text-sub text-xs m-0 mt-1">No players currently in world. Jump in and be the first to join!</p>
+                            </div>
+                          ) : (
+                            <div className="portal-online-players-grid mt-3">
+                              {onlinePlayers.map((player) => (
+                                <div key={player.name} className="portal-online-player-card">
+                                  <PlayerSkinAvatar name={player.name} size={48} />
+                                  <div className="portal-online-player-info">
+                                    <div className="d-flex items-center gap-1.5">
+                                      <h4 className="portal-online-player-name" title={player.name}>
+                                        {player.name}
+                                      </h4>
+                                      {player.isOp && (
+                                        <span className="portal-op-badge" title="Server Operator">
+                                          👑 OP
+                                        </span>
+                                      )}
+                                    </div>
+                                    <span className="portal-online-player-status">
+                                      <span className="dot-tiny-green" /> Active in World
+                                    </span>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
                         </div>
                       </div>
                     );

@@ -1,6 +1,6 @@
 {
-  "commit": "3bf9267",
-  "commitFull": "3bf92674e2d27e02b70b556f87455d3f23490918",
+  "commit": "1c5c518",
+  "commitFull": "1c5c5182b261d984418e16539cbb3e15205497f9",
   "date": "Just now",
-  "subject": "feat(mobile): overhaul mobile-only UI/UX look and feel, touch ergonomics, and dock navigation"
+  "subject": "feat(portal): display online players by name and Minecraft skin face avatar on Player Quick-Start Portal"
 }

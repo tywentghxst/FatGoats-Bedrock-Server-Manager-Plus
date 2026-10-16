@@ -44,6 +44,7 @@ function getEffectivePortalBranding() {
 
   const defaultSections = [
     { id: 'server_status', name: 'Server Status & Power Controls', enabled: true },
+    { id: 'online_players', name: 'Online Players (Name & Skin Face)', enabled: true },
     { id: 'direct_ip', name: 'Direct Server IP Connection', enabled: true },
     { id: 'xbox_bot', name: 'Xbox Live Friend Relay Bot', enabled: true },
     { id: 'installed_addons', name: 'Installed Addons', enabled: true },
@@ -283,6 +284,25 @@ router.get('/status', (req, res) => {
     const status = serverProcess.getStatus();
     const xboxStatus = showXboxBot ? broadcasterService.getStatus() : null;
 
+    let onlinePlayers = [];
+    try {
+      const playerService = require('../services/playerService');
+      const pData = playerService.getPlayers(serverProcess);
+      onlinePlayers = (pData?.online || []).map((p) => ({
+        name: p.name,
+        xuid: p.xuid || null,
+        isOp: Boolean(p.isOp),
+      }));
+    } catch (_) {
+      onlinePlayers = Array.from(serverProcess.connectedPlayers || []).map((name) => ({
+        name,
+        xuid: null,
+        isOp: false,
+      }));
+    }
+
+    const livePlayerCount = onlinePlayers.length > 0 ? onlinePlayers.length : (status.playerCount || 0);
+
     return res.json({
       enabled: true,
       requireLogin,
@@ -296,8 +316,10 @@ router.get('/status', (req, res) => {
       subtitle,
       sections,
       state: status.state || (status.running ? 'running' : 'stopped'),
-      playerCount: status.playerCount || 0,
+      playerCount: livePlayerCount,
       maxPlayers: status.maxPlayers || 10,
+      onlinePlayers,
+      players: onlinePlayers,
       port: status.port || 19132,
       version: status.version || 'Bedrock Dedicated Server',
       uptime: status.uptime || 0,

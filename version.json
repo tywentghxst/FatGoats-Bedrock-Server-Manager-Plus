@@ -1,6 +1,6 @@
 {
-  "commit": "5da11c9",
-  "commitFull": "5da11c9891b5c96414674fea3a81821d5a63ee69",
+  "commit": "ea34497",
+  "commitFull": "ea34497491cf68d06d4cb98e94fa4d1a58c06f75",
   "date": "Just now",
-  "subject": "fix(api): support both PUT and POST on /properties/experiments and /worlds/experiments and sanitize html errors"
+  "subject": "fix(server): add request logger, api 404 handler, no-cache headers, and api fallbacks"
 }

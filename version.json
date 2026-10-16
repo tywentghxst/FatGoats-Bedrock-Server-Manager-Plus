@@ -1,6 +1,6 @@
 {
-  "commit": "ea34497",
-  "commitFull": "ea34497491cf68d06d4cb98e94fa4d1a58c06f75",
+  "commit": "b137d94",
+  "commitFull": "b137d94eecde49899fc92d9f29f12f8913cea132",
   "date": "Just now",
-  "subject": "fix(server): add request logger, api 404 handler, no-cache headers, and api fallbacks"
+  "subject": "feat(worlds): add .mcworld import, export, thumbnail icons, and world management"
 }

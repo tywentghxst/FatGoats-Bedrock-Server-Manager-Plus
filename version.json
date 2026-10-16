@@ -1,6 +1,6 @@
 {
-  "commit": "8540d6f",
-  "commitFull": "8540d6f2992c690a0db210fe90eb4bb944110624",
+  "commit": "d38354d",
+  "commitFull": "d38354db2670498c220a5b2c23b8acb8b0581193",
   "date": "Just now",
   "subject": "fix(properties): auto-save world experiments on toggle and provide restart button"
 }

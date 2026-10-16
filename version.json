@@ -1,6 +1,6 @@
 {
-  "commit": "d38354d",
-  "commitFull": "d38354db2670498c220a5b2c23b8acb8b0581193",
+  "commit": "5da11c9",
+  "commitFull": "5da11c9891b5c96414674fea3a81821d5a63ee69",
   "date": "Just now",
-  "subject": "fix(properties): auto-save world experiments on toggle and provide restart button"
+  "subject": "fix(api): support both PUT and POST on /properties/experiments and /worlds/experiments and sanitize html errors"
 }

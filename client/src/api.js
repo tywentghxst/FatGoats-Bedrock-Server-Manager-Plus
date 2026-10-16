@@ -151,13 +151,26 @@ export const Worlds = {
   list: () => request('GET', '/api/worlds'),
   setActive: (name) => request('POST', '/api/worlds/active', { name }),
   delete: (name) => request('DELETE', `/api/worlds/${encodeURIComponent(name)}`),
-  import: (file, options = {}) => {
+  import: async (file, options = {}) => {
     const formData = new FormData();
     formData.append('world', file);
+    formData.append('file', file);
     if (options.name) formData.append('name', options.name);
     if (options.overwrite !== undefined) formData.append('overwrite', options.overwrite);
     if (options.setActive !== undefined) formData.append('setActive', options.setActive);
-    return request('POST', '/api/worlds/import', formData, true);
+
+    try {
+      return await request('POST', '/api/worlds/import', formData, true);
+    } catch (err) {
+      if (err.status === 404 || err.status === 405) {
+        try {
+          return await request('POST', '/api/worlds/upload', formData, true);
+        } catch (_) {
+          return await request('POST', '/api/worlds', formData, true);
+        }
+      }
+      throw err;
+    }
   },
   getExportUrl: (worldName) => {
     const token = getToken();

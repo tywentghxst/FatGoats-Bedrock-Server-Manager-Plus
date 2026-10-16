@@ -119,7 +119,25 @@ router.get('/:name/export', (req, res) => {
 });
 
 /**
- * POST /import and POST /upload
+ * Safe Multer middleware that accepts any field name ('world', 'file', etc.)
+ * and catches multer errors gracefully without throwing HTML errors.
+ */
+const uploadMiddleware = (req, res, next) => {
+  upload.any()(req, res, (err) => {
+    if (err) {
+      console.warn('[WorldsRoute] Upload error:', err.message);
+      return res.status(400).json({ error: err.message || 'File upload error' });
+    }
+    if (req.files && req.files.length > 0) {
+      // Find field named 'world' or 'file', or default to first file
+      req.file = req.files.find((f) => f.fieldname === 'world' || f.fieldname === 'file') || req.files[0];
+    }
+    next();
+  });
+};
+
+/**
+ * POST /import, POST /upload, and POST /
  * Upload and extract a .mcworld or .zip world archive
  */
 const handleImportWorld = async (req, res) => {
@@ -164,8 +182,18 @@ const handleImportWorld = async (req, res) => {
   }
 };
 
-router.post('/import', authenticate, requireAdmin, upload.single('world'), handleImportWorld);
-router.post('/upload', authenticate, requireAdmin, upload.single('world'), handleImportWorld);
+router.post('/import', authenticate, requireAdmin, uploadMiddleware, handleImportWorld);
+router.post('/upload', authenticate, requireAdmin, uploadMiddleware, handleImportWorld);
+router.post('/', (req, res, next) => {
+  if (req.is('multipart/form-data')) {
+    return authenticate(req, res, () =>
+      requireAdmin(req, res, () =>
+        uploadMiddleware(req, res, () => handleImportWorld(req, res))
+      )
+    );
+  }
+  next();
+});
 
 /**
  * POST /active

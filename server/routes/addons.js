@@ -131,6 +131,25 @@ router.post('/upload', authenticate, requireAdmin, (req, res) => {
     }
 
     try {
+      if (uploadedFile.originalname.toLowerCase().endsWith('.mcworld')) {
+        const worldService = require('../services/worldService');
+        const worldRes = await worldService.importWorld(uploadedFile.path, uploadedFile.originalname, {
+          setActive: false,
+        });
+        logAudit(req.user.id, req.user.username, 'IMPORT_WORLD', {
+          originalFilename: uploadedFile.originalname,
+          worldName: worldRes.world?.name,
+          via: 'addons_page',
+        });
+        return res.status(201).json({
+          success: true,
+          message: `World save "${worldRes.world?.displayName || uploadedFile.originalname}" was recognized as a Minecraft world and imported into World Management!`,
+          isWorld: true,
+          world: worldRes.world,
+          addons: [],
+        });
+      }
+
       const processedAddons = await addonService.processAddonUpload(uploadedFile.path, uploadedFile.originalname);
       logAudit(req.user.id, req.user.username, 'ADDON_UPLOAD', {
         originalName: uploadedFile.originalname,

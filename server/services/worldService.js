@@ -75,19 +75,32 @@ function sanitizeWorldFolderName(name) {
  * Search extracted folder for the directory containing level.dat
  */
 function findWorldRoot(dir) {
-  // Check if current dir has level.dat
-  if (fs.existsSync(path.join(dir, 'level.dat'))) {
-    return dir;
-  }
+  try {
+    if (!fs.existsSync(dir)) return null;
+    const entries = fs.readdirSync(dir, { withFileTypes: true });
 
-  // Check subdirectories
-  const entries = fs.readdirSync(dir, { withFileTypes: true });
-  for (const entry of entries) {
-    if (entry.isDirectory()) {
-      const subDir = path.join(dir, entry.name);
-      const found = findWorldRoot(subDir);
-      if (found) return found;
+    // Look for level.dat (case-insensitive) in current dir
+    const levelDatFile = entries.find(
+      (e) => e.isFile() && e.name.toLowerCase() === 'level.dat'
+    );
+    if (levelDatFile) {
+      return dir;
     }
+
+    // Check subdirectories, ignoring macOS metadata & hidden directories
+    for (const entry of entries) {
+      if (entry.isDirectory()) {
+        const name = entry.name;
+        if (name === '__MACOSX' || name.startsWith('.') || name === 'System Volume Information') {
+          continue;
+        }
+        const subDir = path.join(dir, name);
+        const found = findWorldRoot(subDir);
+        if (found) return found;
+      }
+    }
+  } catch (err) {
+    console.warn('[WorldService] findWorldRoot error:', err.message);
   }
   return null;
 }
@@ -292,7 +305,18 @@ async function importWorld(filePath, originalFilename = '', options = {}) {
     const overwrite = Boolean(options.overwrite);
     if (fs.existsSync(targetWorldDir)) {
       if (overwrite) {
-        // Prevent deleting active world if it's currently running
+        // Prevent deleting active world if it's currently running in BDS
+        const serverProcess = require('./serverProcess');
+        const isServerRunning = serverProcess.state === 'running' || serverProcess.state === 'starting';
+        const propsPath = path.join(config.BDS_DIR, 'server.properties');
+        const currentProps = parseProperties(propsPath);
+        const activeWorld = currentProps['level-name'] || 'Bedrock level';
+
+        if (isServerRunning && targetFolderName === activeWorld) {
+          throw new Error(
+            `Cannot overwrite "${targetFolderName}": This world is currently loaded and running in Bedrock Dedicated Server. Please stop the server first before overwriting it.`
+          );
+        }
         fs.rmSync(targetWorldDir, { recursive: true, force: true });
       } else {
         // Find next non-conflicting name

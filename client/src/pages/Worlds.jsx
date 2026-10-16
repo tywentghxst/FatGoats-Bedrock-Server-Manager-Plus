@@ -1,10 +1,9 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import api from '../api';
 import { useAuth } from '../context/AuthContext';
-
 export const Worlds = () => {
   const { user } = useAuth();
-  const isAdmin = user?.role === 'admin';
+  const isAdmin = user?.role === 'admin' || user?.role === 'operator';
 
   const [worlds, setWorlds] = useState([]);
   const [activeWorld, setActiveWorld] = useState('');
@@ -115,15 +114,11 @@ export const Worlds = () => {
   // Handle file drop / selection
   const handleFileChosen = (file) => {
     if (!file) return;
-    const ext = file.name.slice(file.name.lastIndexOf('.')).toLowerCase();
-    if (ext !== '.mcworld' && ext !== '.zip') {
-      setImportError('Please select a valid Minecraft world archive (.mcworld or .zip).');
-      return;
-    }
     setSelectedFile(file);
     setImportError(null);
-    const suggestedName = file.name.replace(/\.(mcworld|zip)$/i, '').replace(/[_-]/g, ' ');
-    setCustomWorldName(suggestedName);
+    let suggestedName = file.name || 'Imported World';
+    suggestedName = suggestedName.replace(/\.[^/.]+$/, '').replace(/[_-]/g, ' ').trim();
+    setCustomWorldName(suggestedName || 'Imported World');
   };
 
   const handleDragOver = (e) => {
@@ -520,13 +515,12 @@ export const Worlds = () => {
                   </div>
                 )}
 
-                {/* Dropzone */}
+                {/* Dropzone with native overlay for 100% reliable tap/click across mobile & desktop */}
                 <div
-                  className={`upload-zone-modern ${isDragging ? 'dragging' : ''} ${isImporting ? 'uploading' : ''} mb-4`}
+                  className={`upload-zone-modern ${isDragging ? 'dragging' : ''} ${isImporting ? 'uploading' : ''} mb-4 position-relative`}
                   onDragOver={handleDragOver}
                   onDragLeave={handleDragLeave}
                   onDrop={handleDrop}
-                  onClick={() => !isImporting && fileInputRef.current?.click()}
                   style={{
                     border: '2px dashed rgba(16, 185, 129, 0.4)',
                     borderRadius: 12,
@@ -535,36 +529,58 @@ export const Worlds = () => {
                     cursor: isImporting ? 'wait' : 'pointer',
                     background: isDragging ? 'rgba(16, 185, 129, 0.15)' : 'rgba(15, 23, 42, 0.6)',
                     transition: 'all 0.2s ease',
+                    position: 'relative',
+                    overflow: 'hidden',
                   }}
                 >
                   <input
                     type="file"
                     ref={fileInputRef}
-                    className="d-none"
-                    accept=".mcworld,.zip"
+                    accept=".mcworld,.zip,application/zip,application/x-zip-compressed,application/octet-stream,*/*"
                     onChange={(e) => handleFileChosen(e.target.files?.[0])}
                     disabled={isImporting}
+                    style={{
+                      position: 'absolute',
+                      top: 0,
+                      left: 0,
+                      width: '100%',
+                      height: '100%',
+                      opacity: 0,
+                      cursor: isImporting ? 'wait' : 'pointer',
+                      zIndex: 10,
+                    }}
+                    title="Tap or click to browse world file (.mcworld or .zip)"
                   />
 
                   {selectedFile ? (
-                    <div className="file-selected-box">
+                    <div className="file-selected-box" style={{ pointerEvents: 'none', position: 'relative', zIndex: 1 }}>
                       <div className="mb-2" style={{ fontSize: '2.4rem' }}>🗺️</div>
                       <div className="font-semibold text-white mb-1" style={{ wordBreak: 'break-all' }}>
                         {selectedFile.name}
                       </div>
-                      <div className="text-muted text-xs font-mono">
-                        {formatSize(selectedFile.size)} • Click or drop another file to change
+                      <div className="text-muted text-xs font-mono mb-2">
+                        {formatSize(selectedFile.size)}
                       </div>
+                      <span className="badge badge-primary text-2xs">
+                        Tap or drop another file to change
+                      </span>
                     </div>
                   ) : (
-                    <div className="file-prompt-box">
+                    <div className="file-prompt-box" style={{ pointerEvents: 'none', position: 'relative', zIndex: 1 }}>
                       <div className="mb-2" style={{ fontSize: '2.4rem' }}>📦</div>
                       <div className="font-semibold text-white mb-1">
-                        {isDragging ? 'Drop .mcworld file here' : 'Click to select or drag & drop .mcworld save'}
+                        {isDragging ? 'Drop .mcworld file here' : 'Tap or click to browse .mcworld save'}
                       </div>
-                      <div className="text-muted text-xs">
+                      <div className="text-muted text-xs mb-3">
                         Supports standard <code>.mcworld</code> export packages and world <code>.zip</code> archives.
                       </div>
+                      <button
+                        type="button"
+                        className="btn btn-primary btn-sm"
+                        style={{ pointerEvents: 'none' }}
+                      >
+                        Browse World Files
+                      </button>
                     </div>
                   )}
                 </div>

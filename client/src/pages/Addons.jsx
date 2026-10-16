@@ -307,12 +307,17 @@ export const Addons = () => {
 
     let successCount = 0;
     const errors = [];
+    const importedWorlds = [];
 
     for (let i = 0; i < validFiles.length; i++) {
       const file = validFiles[i];
       try {
-        await api.Addons.upload(file);
-        successCount++;
+        const res = await api.Addons.upload(file);
+        if (res && res.isWorld) {
+          importedWorlds.push(res.world?.displayName || file.name);
+        } else {
+          successCount++;
+        }
       } catch (err) {
         console.error(`Failed to upload ${file.name}:`, err);
         errors.push(`${file.name}: ${err.message || 'Upload failed'}`);
@@ -324,9 +329,15 @@ export const Addons = () => {
     setUploadQueue([]);
 
     if (errors.length > 0) {
-      setError(`Installed ${successCount}/${validFiles.length} pack(s). Errors: ${errors.join(', ')}`);
+      setError(`Processed ${successCount + importedWorlds.length}/${validFiles.length} file(s). Errors: ${errors.join(', ')}`);
     } else {
-      setSuccessMsg(`Successfully installed ${successCount} addon package(s)! Automatically synchronized to world.`);
+      if (importedWorlds.length > 0 && successCount > 0) {
+        setSuccessMsg(`Installed ${successCount} addon(s) and imported world(s) "${importedWorlds.join(', ')}" into World Management!`);
+      } else if (importedWorlds.length > 0) {
+        setSuccessMsg(`World save "${importedWorlds.join(', ')}" was recognized and imported into World Management! Switch to the Worlds page to manage or activate it.`);
+      } else {
+        setSuccessMsg(`Successfully installed ${successCount} addon package(s)! Automatically synchronized to world.`);
+      }
     }
 
     await loadData();
@@ -1091,7 +1102,7 @@ export const Addons = () => {
                 ref={fileInputRef}
                 className="d-none"
                 multiple
-                accept=".mcpack,.mcaddon,.mcworld,.zip"
+                accept=".mcpack,.mcaddon,.mcworld,.zip,application/zip,application/x-zip-compressed,application/octet-stream,*/*"
                 onChange={handleFileInputChange}
                 disabled={isUploading || !isAdmin}
               />

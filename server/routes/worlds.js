@@ -4,7 +4,7 @@ const path = require('path');
 const multer = require('multer');
 const jwt = require('jsonwebtoken');
 const config = require('../config');
-const { authenticate, requireAdmin } = require('../middleware/auth');
+const { authenticate, requireAdmin, requireOperatorOrAdmin } = require('../middleware/auth');
 const { parseProperties, writeProperties } = require('../utils/propertyParser');
 const { logAudit } = require('../services/auditService');
 const serverProcess = require('../services/serverProcess');
@@ -178,18 +178,18 @@ const handleImportWorld = async (req, res) => {
   }
 };
 
-router.post('/import', authenticate, requireAdmin, uploadMiddleware, handleImportWorld);
-router.post('/upload', authenticate, requireAdmin, uploadMiddleware, handleImportWorld);
-router.post('/', authenticate, requireAdmin, uploadMiddleware, handleImportWorld);
-router.put('/import', authenticate, requireAdmin, uploadMiddleware, handleImportWorld);
-router.put('/upload', authenticate, requireAdmin, uploadMiddleware, handleImportWorld);
-router.put('/', authenticate, requireAdmin, uploadMiddleware, handleImportWorld);
+router.post('/import', authenticate, requireOperatorOrAdmin, uploadMiddleware, handleImportWorld);
+router.post('/upload', authenticate, requireOperatorOrAdmin, uploadMiddleware, handleImportWorld);
+router.post('/', authenticate, requireOperatorOrAdmin, uploadMiddleware, handleImportWorld);
+router.put('/import', authenticate, requireOperatorOrAdmin, uploadMiddleware, handleImportWorld);
+router.put('/upload', authenticate, requireOperatorOrAdmin, uploadMiddleware, handleImportWorld);
+router.put('/', authenticate, requireOperatorOrAdmin, uploadMiddleware, handleImportWorld);
 
 /**
  * POST /active
  * Set active world by updating level-name in server.properties, logAudit
  */
-router.post('/active', authenticate, requireAdmin, (req, res) => {
+router.post('/active', authenticate, requireOperatorOrAdmin, (req, res) => {
   try {
     const { worldName } = req.body;
 

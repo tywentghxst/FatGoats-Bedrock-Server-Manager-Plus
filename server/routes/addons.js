@@ -150,7 +150,44 @@ router.post('/upload', authenticate, requireAdmin, (req, res) => {
         });
       }
 
-      const processedAddons = await addonService.processAddonUpload(uploadedFile.path, uploadedFile.originalname);
+      // Preserve temporary file copy in case processAddonUpload unlinks it on manifest failure
+      const backupPath = uploadedFile.path + '.bak';
+      try { fs.copyFileSync(uploadedFile.path, backupPath); } catch (_) {}
+
+      let processedAddons;
+      try {
+        processedAddons = await addonService.processAddonUpload(uploadedFile.path, uploadedFile.originalname);
+        try { if (fs.existsSync(backupPath)) fs.unlinkSync(backupPath); } catch (_) {}
+      } catch (addonErr) {
+        // If manifest.json was not found in the archive, check if this is actually a Minecraft world package
+        if (addonErr.message && addonErr.message.includes('manifest.json') && fs.existsSync(backupPath)) {
+          try {
+            const worldService = require('../services/worldService');
+            const worldRes = await worldService.importWorld(backupPath, uploadedFile.originalname, {
+              setActive: false,
+            });
+            try { if (fs.existsSync(backupPath)) fs.unlinkSync(backupPath); } catch (_) {}
+            logAudit(req.user.id, req.user.username, 'IMPORT_WORLD', {
+              originalFilename: uploadedFile.originalname,
+              worldName: worldRes.world?.name,
+              via: 'addons_smart_fallback',
+            });
+            return res.status(201).json({
+              success: true,
+              message: `Archive "${worldRes.world?.displayName || uploadedFile.originalname}" was recognized as a Minecraft world save and imported into World Management!`,
+              isWorld: true,
+              world: worldRes.world,
+              addons: [],
+            });
+          } catch (_) {
+            try { if (fs.existsSync(backupPath)) fs.unlinkSync(backupPath); } catch (_) {}
+            throw addonErr;
+          }
+        }
+        try { if (fs.existsSync(backupPath)) fs.unlinkSync(backupPath); } catch (_) {}
+        throw addonErr;
+      }
+
       logAudit(req.user.id, req.user.username, 'ADDON_UPLOAD', {
         originalName: uploadedFile.originalname,
         addons: processedAddons

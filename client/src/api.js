@@ -151,6 +151,18 @@ export const Worlds = {
   list: () => request('GET', '/api/worlds'),
   setActive: (name) => request('POST', '/api/worlds/active', { name }),
   delete: (name) => request('DELETE', `/api/worlds/${encodeURIComponent(name)}`),
+  import: (file, options = {}) => {
+    const formData = new FormData();
+    formData.append('world', file);
+    if (options.name) formData.append('name', options.name);
+    if (options.overwrite !== undefined) formData.append('overwrite', options.overwrite);
+    if (options.setActive !== undefined) formData.append('setActive', options.setActive);
+    return request('POST', '/api/worlds/import', formData, true);
+  },
+  getExportUrl: (worldName) => {
+    const token = getToken();
+    return `/api/worlds/${encodeURIComponent(worldName)}/export${token ? `?token=${encodeURIComponent(token)}` : ''}`;
+  },
 };
 
 export const Backups = {
@@ -314,6 +326,8 @@ const api = {
   listWorlds: Worlds.list,
   setActiveWorld: Worlds.setActive,
   deleteWorld: Worlds.delete,
+  importWorld: Worlds.import,
+  exportWorldUrl: Worlds.getExportUrl,
 
   listBackups: Backups.list,
   createBackup: Backups.create,

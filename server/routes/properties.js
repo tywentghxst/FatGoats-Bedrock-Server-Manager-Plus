@@ -84,10 +84,9 @@ router.get('/experiments', authenticate, async (req, res) => {
 });
 
 /**
- * PUT /experiments
- * Toggle and save experimental features in the world level.dat
+ * Handler for updating world experimental features
  */
-router.put('/experiments', authenticate, requireAdmin, async (req, res) => {
+const handleUpdateExperiments = async (req, res) => {
   try {
     const { worldName, experiments } = req.body;
 
@@ -120,6 +119,9 @@ router.put('/experiments', authenticate, requireAdmin, async (req, res) => {
       details: err.message,
     });
   }
-});
+};
+
+router.put('/experiments', authenticate, requireAdmin, handleUpdateExperiments);
+router.post('/experiments', authenticate, requireAdmin, handleUpdateExperiments);
 
 module.exports = router;

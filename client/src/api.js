@@ -53,11 +53,23 @@ export const request = async (method, url, body = null, isFormData = false, extr
   }
 
   if (!response.ok) {
-    const errorMsg =
+    let errorMsg =
       (data && data.details) ||
       (data && data.message) ||
-      (data && data.error) ||
-      (typeof data === 'string' ? data : 'API Request Failed');
+      (data && data.error);
+
+    if (!errorMsg && typeof data === 'string') {
+      const preMatch = data.match(/<pre>(.*?)<\/pre>/is);
+      if (preMatch) {
+        errorMsg = preMatch[1].trim();
+      } else {
+        const stripped = data.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+        errorMsg = stripped || 'API Request Failed';
+      }
+    } else if (!errorMsg) {
+      errorMsg = 'API Request Failed';
+    }
+
     const error = new Error(errorMsg);
     error.status = response.status;
     error.data = data;

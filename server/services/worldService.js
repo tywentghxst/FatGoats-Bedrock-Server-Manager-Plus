@@ -410,6 +410,156 @@ function exportWorld(worldName, res) {
   archive.finalize();
 }
 
+/**
+ * Generate a new Bedrock world.
+ * Creates the world directory, writes levelname.txt, and optionally updates
+ * server.properties (level-name, level-seed, gamemode, difficulty, level-type)
+ * and starts/restarts the Bedrock Dedicated Server to begin world generation.
+ */
+async function generateWorld(options = {}) {
+  const displayName = (options.name && typeof options.name === 'string')
+    ? options.name.trim()
+    : '';
+
+  if (!displayName) {
+    throw new Error('A valid world name is required.');
+  }
+
+  const baseFolderName = sanitizeWorldFolderName(displayName);
+  const worldsDir = getWorldsDirectory();
+  ensureDir(worldsDir);
+
+  let targetFolderName = baseFolderName;
+  let targetWorldDir = path.join(worldsDir, targetFolderName);
+
+  const overwrite = Boolean(options.overwrite);
+  if (fs.existsSync(targetWorldDir)) {
+    if (overwrite) {
+      const serverProcess = require('./serverProcess');
+      const isServerRunning = serverProcess.state === 'running' || serverProcess.state === 'starting';
+      const propsPath = path.join(config.BDS_DIR, 'server.properties');
+      const currentProps = parseProperties(propsPath);
+      const activeWorld = currentProps['level-name'] || 'Bedrock level';
+
+      if (isServerRunning && targetFolderName === activeWorld) {
+        throw new Error(
+          `Cannot overwrite "${targetFolderName}": This world is currently loaded and running in Bedrock Dedicated Server. Please stop the server first before overwriting it.`
+        );
+      }
+      fs.rmSync(targetWorldDir, { recursive: true, force: true });
+    } else {
+      let counter = 1;
+      while (fs.existsSync(path.join(worldsDir, `${baseFolderName} (${counter})`))) {
+        counter++;
+      }
+      targetFolderName = `${baseFolderName} (${counter})`;
+      targetWorldDir = path.join(worldsDir, targetFolderName);
+    }
+  }
+
+  ensureDir(targetWorldDir);
+
+  // Write levelname.txt
+  fs.writeFileSync(path.join(targetWorldDir, 'levelname.txt'), displayName, 'utf8');
+
+  // Save generator preset config inside the world folder for reference
+  const generatorConfig = {
+    displayName,
+    folderName: targetFolderName,
+    seed: options.seed ? String(options.seed).trim() : '',
+    gameMode: options.gameMode || 'survival',
+    difficulty: options.difficulty || 'normal',
+    worldType: (options.worldType || 'DEFAULT').toUpperCase(),
+    createdAt: new Date().toISOString(),
+  };
+
+  try {
+    fs.writeFileSync(
+      path.join(targetWorldDir, '.bsm_generator.json'),
+      JSON.stringify(generatorConfig, null, 2),
+      'utf8'
+    );
+  } catch (_) {}
+
+  let wasActivated = false;
+  const shouldSetActive = options.setActive !== undefined ? Boolean(options.setActive) : true;
+
+  const propsPath = path.join(config.BDS_DIR, 'server.properties');
+  const properties = parseProperties(propsPath);
+
+  if (shouldSetActive) {
+    properties['level-name'] = targetFolderName;
+    if (generatorConfig.seed) {
+      properties['level-seed'] = generatorConfig.seed;
+    } else if (options.clearSeed !== false) {
+      properties['level-seed'] = '';
+    }
+
+    if (generatorConfig.gameMode) {
+      properties['gamemode'] = generatorConfig.gameMode.toLowerCase();
+    }
+    if (generatorConfig.difficulty) {
+      properties['difficulty'] = generatorConfig.difficulty.toLowerCase();
+    }
+    if (generatorConfig.worldType) {
+      properties['level-type'] = generatorConfig.worldType.toUpperCase();
+    }
+
+    writeProperties(propsPath, properties);
+    wasActivated = true;
+  }
+
+  const currentActive = properties['level-name'] || 'Bedrock level';
+  const resultMeta = await getWorldMetadata(targetFolderName, currentActive);
+
+  // Check if caller wants to start or restart server immediately to trigger BDS generation
+  let serverRestarted = false;
+  let serverStarted = false;
+  const serverProcess = require('./serverProcess');
+
+  if (options.startOrRestartServer && shouldSetActive) {
+    try {
+      if (serverProcess.state === 'running' || serverProcess.state === 'starting') {
+        serverProcess.restart().catch((err) => {
+          console.warn('[WorldService] Server restart notice after generation:', err.message);
+        });
+        serverRestarted = true;
+      } else if (serverProcess.state === 'stopped') {
+        serverProcess.start().catch((err) => {
+          console.warn('[WorldService] Server start notice after generation:', err.message);
+        });
+        serverStarted = true;
+      }
+    } catch (procErr) {
+      console.warn('[WorldService] Could not auto-trigger server process:', procErr.message);
+    }
+  }
+
+  let message = wasActivated
+    ? `New world "${displayName}" created and set as active!`
+    : `New world "${displayName}" created successfully in World Management!`;
+
+  if (serverRestarted) {
+    message += ' Bedrock server is restarting to generate terrain chunks.';
+  } else if (serverStarted) {
+    message += ' Bedrock server is starting to generate terrain chunks.';
+  } else if (wasActivated) {
+    message += ' Start or restart the Bedrock server to generate terrain chunks.';
+  } else {
+    message += ' Switch to it and restart the server whenever you want to generate it.';
+  }
+
+  return {
+    success: true,
+    world: resultMeta,
+    wasActivated,
+    serverRestarted,
+    serverStarted,
+    message,
+    generatorConfig,
+  };
+}
+
 module.exports = {
   getWorldsDirectory,
   getDirectorySize,
@@ -417,6 +567,7 @@ module.exports = {
   getWorldMetadata,
   listWorlds,
   importWorld,
+  generateWorld,
   exportWorld,
   sanitizeWorldFolderName,
 };

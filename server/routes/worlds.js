@@ -186,18 +186,73 @@ router.put('/upload', authenticate, requireOperatorOrAdmin, uploadMiddleware, ha
 router.put('/', authenticate, requireOperatorOrAdmin, uploadMiddleware, handleImportWorld);
 
 /**
+ * POST /generate & PUT /generate
+ * Generate a new world with custom name, seed, gamemode, difficulty, and type
+ */
+const handleGenerateWorld = async (req, res) => {
+  try {
+    const {
+      name,
+      seed,
+      gameMode,
+      difficulty,
+      worldType,
+      setActive,
+      startOrRestartServer,
+      overwrite,
+    } = req.body;
+
+    if (!name || typeof name !== 'string' || !name.trim()) {
+      return res.status(400).json({ error: 'World name is required.' });
+    }
+
+    const result = await worldService.generateWorld({
+      name,
+      seed,
+      gameMode,
+      difficulty,
+      worldType,
+      setActive,
+      startOrRestartServer,
+      overwrite,
+    });
+
+    logAudit(req.user.id, req.user.username, 'GENERATE_WORLD', {
+      worldName: result.world?.name,
+      displayName: result.world?.displayName,
+      seed,
+      gameMode,
+      difficulty,
+      worldType,
+      setActive,
+      startOrRestartServer,
+    });
+
+    return res.json(result);
+  } catch (err) {
+    console.error('[WorldsRoute] Error generating world:', err);
+    return res.status(500).json({
+      error: err.message || 'Failed to generate new world',
+    });
+  }
+};
+
+router.post('/generate', authenticate, requireOperatorOrAdmin, handleGenerateWorld);
+router.put('/generate', authenticate, requireOperatorOrAdmin, handleGenerateWorld);
+
+/**
  * POST /active
  * Set active world by updating level-name in server.properties, logAudit
  */
 router.post('/active', authenticate, requireOperatorOrAdmin, (req, res) => {
   try {
-    const { worldName } = req.body;
+    const rawWorldName = req.body.worldName || req.body.name;
 
-    if (!worldName || typeof worldName !== 'string' || !worldName.trim()) {
+    if (!rawWorldName || typeof rawWorldName !== 'string' || !rawWorldName.trim()) {
       return res.status(400).json({ error: 'worldName is required.' });
     }
 
-    const trimmedWorldName = worldName.trim();
+    const trimmedWorldName = rawWorldName.trim();
     const worldsDir = worldService.getWorldsDirectory();
     const targetWorldDir = path.join(worldsDir, trimmedWorldName);
 
@@ -207,6 +262,20 @@ router.post('/active', authenticate, requireOperatorOrAdmin, (req, res) => {
     const properties = parseProperties(propsPath);
     const prevWorld = properties['level-name'];
     properties['level-name'] = trimmedWorldName;
+
+    // Check if this world has pending generator settings
+    const generatorConfigPath = path.join(targetWorldDir, '.bsm_generator.json');
+    const hasLevelDat = fs.existsSync(path.join(targetWorldDir, 'level.dat'));
+    if (!hasLevelDat && fs.existsSync(generatorConfigPath)) {
+      try {
+        const genConfig = JSON.parse(fs.readFileSync(generatorConfigPath, 'utf8'));
+        if (genConfig.seed !== undefined) properties['level-seed'] = genConfig.seed;
+        if (genConfig.gameMode) properties['gamemode'] = genConfig.gameMode.toLowerCase();
+        if (genConfig.difficulty) properties['difficulty'] = genConfig.difficulty.toLowerCase();
+        if (genConfig.worldType) properties['level-type'] = genConfig.worldType.toUpperCase();
+      } catch (_) {}
+    }
+
     writeProperties(propsPath, properties);
 
     logAudit(req.user.id, req.user.username, 'SET_ACTIVE_WORLD', {

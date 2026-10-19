@@ -149,8 +149,9 @@ export const Properties = {
 
 export const Worlds = {
   list: () => request('GET', '/api/worlds'),
-  setActive: (name) => request('POST', '/api/worlds/active', { name }),
+  setActive: (name) => request('POST', '/api/worlds/active', { worldName: name, name }),
   delete: (name) => request('DELETE', `/api/worlds/${encodeURIComponent(name)}`),
+  generate: (options) => request('POST', '/api/worlds/generate', options),
   import: async (file, options = {}) => {
     const formData = new FormData();
     formData.append('world', file);
@@ -340,6 +341,7 @@ const api = {
   setActiveWorld: Worlds.setActive,
   deleteWorld: Worlds.delete,
   importWorld: Worlds.import,
+  generateWorld: Worlds.generate,
   exportWorldUrl: Worlds.getExportUrl,
 
   listBackups: Backups.list,

@@ -28,6 +28,19 @@ export const Worlds = () => {
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef(null);
 
+  // Generate World modal state
+  const [generateModalOpen, setGenerateModalOpen] = useState(false);
+  const [genWorldName, setGenWorldName] = useState('');
+  const [genSeed, setGenSeed] = useState('');
+  const [genGameMode, setGenGameMode] = useState('survival');
+  const [genDifficulty, setGenDifficulty] = useState('normal');
+  const [genWorldType, setGenWorldType] = useState('DEFAULT');
+  const [genSetActive, setGenSetActive] = useState(true);
+  const [genStartOrRestart, setGenStartOrRestart] = useState(false);
+  const [genOverwrite, setGenOverwrite] = useState(false);
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [genError, setGenError] = useState(null);
+
   const formatSize = (bytes) => {
     if (!bytes || isNaN(bytes)) return '0 B';
     const units = ['B', 'KB', 'MB', 'GB', 'TB'];
@@ -178,6 +191,58 @@ export const Worlds = () => {
     }
   };
 
+  const generateRandomSeed = () => {
+    const randomSeed = Math.floor(Math.random() * 900000000) + 100000000;
+    const sign = Math.random() > 0.5 ? '' : '-';
+    setGenSeed(`${sign}${randomSeed}`);
+  };
+
+  const resetGenerateState = () => {
+    setGenerateModalOpen(false);
+    setGenWorldName('');
+    setGenSeed('');
+    setGenGameMode('survival');
+    setGenDifficulty('normal');
+    setGenWorldType('DEFAULT');
+    setGenSetActive(true);
+    setGenStartOrRestart(false);
+    setGenOverwrite(false);
+    setIsGenerating(false);
+    setGenError(null);
+  };
+
+  const handleGenerateSubmit = async (e) => {
+    e.preventDefault();
+    if (!genWorldName.trim()) {
+      setGenError('Please provide a world name.');
+      return;
+    }
+
+    setIsGenerating(true);
+    setGenError(null);
+
+    try {
+      const res = await api.Worlds.generate({
+        name: genWorldName.trim(),
+        seed: genSeed.trim(),
+        gameMode: genGameMode,
+        difficulty: genDifficulty,
+        worldType: genWorldType,
+        setActive: genSetActive,
+        startOrRestartServer: genStartOrRestart,
+        overwrite: genOverwrite,
+      });
+
+      setSuccessMsg(res.message || `World "${genWorldName.trim()}" generated successfully!`);
+      resetGenerateState();
+      await loadWorlds();
+    } catch (err) {
+      console.error('World generation failed:', err);
+      setGenError(err.message || 'Failed to generate new world.');
+      setIsGenerating(false);
+    }
+  };
+
   const activeWorldObj = worlds.find((w) => w.name === activeWorld || w.isActive || w.active);
 
   return (
@@ -186,18 +251,29 @@ export const Worlds = () => {
       <div className="page-header d-flex justify-between items-center flex-wrap gap-3">
         <div>
           <h1 className="page-title">World Management</h1>
-          <p className="page-subtitle">Configure, import <code>.mcworld</code> saves, export, and switch active Bedrock worlds</p>
+          <p className="page-subtitle">Configure, generate new worlds, import <code>.mcworld</code> saves, export, and switch active Bedrock worlds</p>
         </div>
-        <div className="header-actions d-flex items-center gap-2">
+        <div className="header-actions d-flex items-center gap-2 flex-wrap">
           <button
             type="button"
             className="btn btn-primary d-flex items-center gap-1.5"
+            onClick={() => setGenerateModalOpen(true)}
+            disabled={actionLoading || !isAdmin}
+            title={!isAdmin ? 'Admin/Operator permission required to generate worlds' : 'Generate a brand new Bedrock world'}
+          >
+            <span>✨</span>
+            <span>Generate World</span>
+          </button>
+
+          <button
+            type="button"
+            className="btn btn-secondary d-flex items-center gap-1.5"
             onClick={() => setImportModalOpen(true)}
             disabled={actionLoading || !isAdmin}
             title={!isAdmin ? 'Admin permission required to import worlds' : 'Import a .mcworld or world .zip archive'}
           >
             <span>📥</span>
-            <span>Import World (.mcworld)</span>
+            <span>Import (.mcworld)</span>
           </button>
 
           <button
@@ -680,6 +756,268 @@ export const Worlds = () => {
                     <>
                       <span>📥</span>
                       <span>Import & Install World</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Generate New World Modal */}
+      {generateModalOpen && (
+        <div className="modal-overlay" onClick={() => !isGenerating && resetGenerateState()}>
+          <div
+            className="modal"
+            style={{ maxWidth: 560, width: '100%' }}
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+          >
+            <div className="modal-header d-flex justify-between items-center">
+              <div className="d-flex items-center gap-2">
+                <span style={{ fontSize: '1.3rem' }}>✨</span>
+                <h3 className="modal-title m-0">Generate New Bedrock World</h3>
+              </div>
+              <button
+                type="button"
+                className="modal-close-btn"
+                onClick={resetGenerateState}
+                disabled={isGenerating}
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleGenerateSubmit}>
+              <div className="modal-body p-4" style={{ maxHeight: '78vh', overflowY: 'auto' }}>
+                {genError && (
+                  <div className="alert alert-danger mb-3 p-2.5 text-xs">
+                    ⚠️ {genError}
+                  </div>
+                )}
+
+                {/* World Presets Strip */}
+                <div className="mb-3">
+                  <label className="text-2xs font-semibold text-muted text-uppercase mb-1.5 d-block">
+                    Quick Presets
+                  </label>
+                  <div className="d-flex gap-1.5 flex-wrap">
+                    <button
+                      type="button"
+                      className="btn btn-sm btn-outline-secondary text-xs"
+                      onClick={() => {
+                        setGenWorldName(genWorldName || 'Survival Realm');
+                        setGenGameMode('survival');
+                        setGenDifficulty('normal');
+                        setGenWorldType('DEFAULT');
+                      }}
+                      disabled={isGenerating}
+                    >
+                      ⚔️ Standard Survival
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-sm btn-outline-secondary text-xs"
+                      onClick={() => {
+                        setGenWorldName(genWorldName || 'Creative Canvas');
+                        setGenGameMode('creative');
+                        setGenDifficulty('peaceful');
+                        setGenWorldType('FLAT');
+                      }}
+                      disabled={isGenerating}
+                    >
+                      🎨 Flat Creative
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-sm btn-outline-secondary text-xs"
+                      onClick={() => {
+                        setGenWorldName(genWorldName || 'Hardcore Survival');
+                        setGenGameMode('survival');
+                        setGenDifficulty('hard');
+                        setGenWorldType('DEFAULT');
+                      }}
+                      disabled={isGenerating}
+                    >
+                      💀 Hard Survival
+                    </button>
+                  </div>
+                </div>
+
+                {/* World Name */}
+                <div className="form-group mb-3">
+                  <label className="form-label text-xs font-semibold text-sub mb-1 d-block">
+                    World Name <span className="text-danger">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    className="input-modern w-full text-sm"
+                    placeholder="e.g. Kingdom of Aethelgard"
+                    value={genWorldName}
+                    onChange={(e) => setGenWorldName(e.target.value)}
+                    disabled={isGenerating}
+                    required
+                    autoFocus
+                  />
+                  <small className="text-muted text-2xs mt-1 d-block">
+                    Unique world directory name stored under <code>bds/worlds/</code>.
+                  </small>
+                </div>
+
+                {/* Seed with Random generator */}
+                <div className="form-group mb-3">
+                  <label className="form-label text-xs font-semibold text-sub mb-1 d-block">
+                    World Seed <span className="text-muted font-normal">(Optional)</span>
+                  </label>
+                  <div className="d-flex gap-2">
+                    <input
+                      type="text"
+                      className="input-modern flex-grow text-sm font-mono"
+                      placeholder="Leave empty for random seed"
+                      value={genSeed}
+                      onChange={(e) => setGenSeed(e.target.value)}
+                      disabled={isGenerating}
+                    />
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm d-flex items-center gap-1"
+                      onClick={generateRandomSeed}
+                      disabled={isGenerating}
+                      title="Generate a random numerical seed"
+                    >
+                      <span>🎲</span>
+                      <span>Random</span>
+                    </button>
+                  </div>
+                  <small className="text-muted text-2xs mt-1 d-block">
+                    Enter any numeric or alphanumeric seed, or click Random.
+                  </small>
+                </div>
+
+                {/* World Configuration Grid: Gamemode, Difficulty, Type */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '0.75rem' }} className="mb-3">
+                  <div className="form-group">
+                    <label className="form-label text-xs font-semibold text-sub mb-1 d-block">
+                      Default Gamemode
+                    </label>
+                    <select
+                      className="input-modern w-full text-sm"
+                      value={genGameMode}
+                      onChange={(e) => setGenGameMode(e.target.value)}
+                      disabled={isGenerating}
+                    >
+                      <option value="survival">⚔️ Survival</option>
+                      <option value="creative">🎨 Creative</option>
+                      <option value="adventure">🧭 Adventure</option>
+                    </select>
+                  </div>
+
+                  <div className="form-group">
+                    <label className="form-label text-xs font-semibold text-sub mb-1 d-block">
+                      Difficulty
+                    </label>
+                    <select
+                      className="input-modern w-full text-sm"
+                      value={genDifficulty}
+                      onChange={(e) => setGenDifficulty(e.target.value)}
+                      disabled={isGenerating}
+                    >
+                      <option value="peaceful">🕊️ Peaceful</option>
+                      <option value="easy">🌱 Easy</option>
+                      <option value="normal">⚖️ Normal</option>
+                      <option value="hard">🔥 Hard</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="form-group mb-3">
+                  <label className="form-label text-xs font-semibold text-sub mb-1 d-block">
+                    World Generator Type
+                  </label>
+                  <select
+                    className="input-modern w-full text-sm"
+                    value={genWorldType}
+                    onChange={(e) => setGenWorldType(e.target.value)}
+                    disabled={isGenerating}
+                  >
+                    <option value="DEFAULT">🌍 Default (Infinite Mountains, Caves &amp; Biomes)</option>
+                    <option value="FLAT">🧱 Flat World (Bedrock + Dirt Surface)</option>
+                  </select>
+                </div>
+
+                {/* Activation & Server Control Checkboxes */}
+                <div className="bg-darker p-3 rounded border mb-2">
+                  <div className="form-check mb-2 d-flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      id="genSetActiveCheck"
+                      className="form-check-input"
+                      checked={genSetActive}
+                      onChange={(e) => setGenSetActive(e.target.checked)}
+                      disabled={isGenerating}
+                    />
+                    <label htmlFor="genSetActiveCheck" className="form-check-label text-xs text-white cursor-pointer m-0">
+                      <strong>Set as Active World immediately</strong> (configures <code>server.properties</code>)
+                    </label>
+                  </div>
+
+                  {genSetActive && (
+                    <div className="form-check mb-2 d-flex items-center gap-2 pl-4">
+                      <input
+                        type="checkbox"
+                        id="genStartOrRestartCheck"
+                        className="form-check-input"
+                        checked={genStartOrRestart}
+                        onChange={(e) => setGenStartOrRestart(e.target.checked)}
+                        disabled={isGenerating}
+                      />
+                      <label htmlFor="genStartOrRestartCheck" className="form-check-label text-xs text-sub cursor-pointer m-0">
+                        ⚡ <strong>Start / Restart Bedrock server now</strong> to immediately generate world terrain chunks
+                      </label>
+                    </div>
+                  )}
+
+                  <div className="form-check d-flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      id="genOverwriteCheck"
+                      className="form-check-input"
+                      checked={genOverwrite}
+                      onChange={(e) => setGenOverwrite(e.target.checked)}
+                      disabled={isGenerating}
+                    />
+                    <label htmlFor="genOverwriteCheck" className="form-check-label text-xs text-sub cursor-pointer m-0">
+                      Overwrite existing world if a folder with this name already exists
+                    </label>
+                  </div>
+                </div>
+              </div>
+
+              <div className="modal-footer d-flex justify-between items-center p-3 border-top">
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={resetGenerateState}
+                  disabled={isGenerating}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="btn btn-primary d-flex items-center gap-1.5"
+                  disabled={!genWorldName.trim() || isGenerating}
+                >
+                  {isGenerating ? (
+                    <>
+                      <span className="spinner-sm" />
+                      <span>Generating World...</span>
+                    </>
+                  ) : (
+                    <>
+                      <span>✨</span>
+                      <span>Generate &amp; Create World</span>
                     </>
                   )}
                 </button>

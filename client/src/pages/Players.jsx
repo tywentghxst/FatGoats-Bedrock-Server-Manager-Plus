@@ -3,6 +3,23 @@ import api from '../api';
 import { useAuth } from '../context/AuthContext';
 import { safeCopyToClipboard } from '../utils/clipboard';
 
+const KICK_REASON_PRESETS = [
+  'AFK / Inactive too long',
+  'Rule Warning / Disruption',
+  'Excessive Ping / Lagging Server',
+  'Server Restart / Maintenance',
+  'Spamming Chat',
+];
+
+const BAN_REASON_PRESETS = [
+  'Griefing / Destroying Builds',
+  'Hacking / Movement Cheats / X-Ray',
+  'Toxic Behavior / Harassment',
+  'Spam / Advertising / Phishing',
+  'Exploiting Duplication Glitches',
+  'Permanent Server Ban',
+];
+
 export const Players = () => {
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
@@ -10,15 +27,17 @@ export const Players = () => {
   const [playersData, setPlayersData] = useState({
     online: [],
     offline: [],
+    banned: [],
     totalCount: 0,
     onlineCount: 0,
     opCount: 0,
     allowlistCount: 0,
+    bannedCount: 0,
   });
   const [serverState, setServerState] = useState('stopped');
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
-  const [activeFilter, setActiveFilter] = useState('all'); // 'all' | 'online' | 'ops' | 'allowlist' | 'offline'
+  const [activeFilter, setActiveFilter] = useState('all'); // 'all' | 'online' | 'ops' | 'allowlist' | 'banned' | 'offline'
   const [actionLoading, setActionLoading] = useState(null); // player name being acted on
   const [toast, setToast] = useState(null); // { type: 'success' | 'error' | 'info', text: '' }
 
@@ -28,10 +47,15 @@ export const Players = () => {
   const [newXuid, setNewXuid] = useState('');
   const [newPermission, setNewPermission] = useState('member');
   const [newIsAllowlisted, setNewIsAllowlisted] = useState(false);
+  const [newIsBanned, setNewIsBanned] = useState(false);
 
   // Modal: Kick player
   const [kickModalPlayer, setKickModalPlayer] = useState(null);
   const [kickReason, setKickReason] = useState('Kicked by administrator');
+
+  // Modal: Ban player
+  const [banModalPlayer, setBanModalPlayer] = useState(null);
+  const [banReason, setBanReason] = useState('Banned by administrator');
 
   const showToast = (type, text) => {
     setToast({ type, text });
@@ -65,6 +89,44 @@ export const Players = () => {
     const interval = setInterval(fetchPlayers, 4000);
     return () => clearInterval(interval);
   }, [fetchPlayers]);
+
+  // Instant Healing
+  const handleHealPlayer = async (player) => {
+    if (!isAdmin) return;
+    if (serverState !== 'running') {
+      showToast('error', 'Bedrock server must be running to heal players.');
+      return;
+    }
+
+    setActionLoading(`${player.name}-heal`);
+    try {
+      const res = await api.Players.heal(player.name);
+      showToast('success', res.message || `💖 Instantly healed ${player.name} to full health!`);
+    } catch (err) {
+      showToast('error', err.message || `Failed to heal ${player.name}`);
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  // Instant Food Heal
+  const handleFeedPlayer = async (player) => {
+    if (!isAdmin) return;
+    if (serverState !== 'running') {
+      showToast('error', 'Bedrock server must be running to feed players.');
+      return;
+    }
+
+    setActionLoading(`${player.name}-feed`);
+    try {
+      const res = await api.Players.feed(player.name);
+      showToast('success', res.message || `🍖 Instantly filled food & saturation for ${player.name}!`);
+    } catch (err) {
+      showToast('error', err.message || `Failed to feed ${player.name}`);
+    } finally {
+      setActionLoading(null);
+    }
+  };
 
   const handleToggleOp = async (player) => {
     if (!isAdmin) return;
@@ -125,12 +187,48 @@ export const Players = () => {
     setActionLoading(kickModalPlayer.name);
     try {
       const res = await api.Players.kick(kickModalPlayer.name, kickReason);
-      showToast('success', res.message || `Player ${kickModalPlayer.name} kicked`);
+      showToast('success', res.message || `👢 Player ${kickModalPlayer.name} kicked`);
       setKickModalPlayer(null);
       setKickReason('Kicked by administrator');
       await fetchPlayers();
     } catch (err) {
       showToast('error', err.message || 'Failed to kick player');
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const handleBanConfirm = async (e) => {
+    e.preventDefault();
+    if (!banModalPlayer) return;
+
+    setActionLoading(banModalPlayer.name);
+    try {
+      const res = await api.Players.ban(banModalPlayer.name, banReason);
+      showToast('success', res.message || `🚫 Player ${banModalPlayer.name} has been banned!`);
+      setBanModalPlayer(null);
+      setBanReason('Banned by administrator');
+      await fetchPlayers();
+    } catch (err) {
+      showToast('error', err.message || 'Failed to ban player');
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const handleUnbanPlayer = async (player) => {
+    if (!isAdmin) return;
+    if (!window.confirm(`Unban player "${player.name}" and allow them to join the server again?`)) {
+      return;
+    }
+
+    setActionLoading(player.name);
+    try {
+      const res = await api.Players.unban(player.name);
+      showToast('success', res.message || `🔓 Unbanned player ${player.name}`);
+      await fetchPlayers();
+    } catch (err) {
+      showToast('error', err.message || `Failed to unban ${player.name}`);
     } finally {
       setActionLoading(null);
     }
@@ -168,12 +266,18 @@ export const Players = () => {
         newPermission,
         newIsAllowlisted
       );
+
+      if (newIsBanned) {
+        await api.Players.ban(newGamertag.trim(), 'Pre-banned upon registration');
+      }
+
       showToast('success', `Added player ${newGamertag} to server directory!`);
       setShowAddModal(false);
       setNewGamertag('');
       setNewXuid('');
       setNewPermission('member');
       setNewIsAllowlisted(false);
+      setNewIsBanned(false);
       await fetchPlayers();
     } catch (err) {
       showToast('error', err.message || 'Failed to add player');
@@ -207,9 +311,11 @@ export const Players = () => {
   const onlineList = playersData.online || [];
   const offlineList = playersData.offline || [];
   const allList = [...onlineList, ...offlineList];
+  const bannedList = playersData.banned || allList.filter((p) => p.isBanned);
 
   const totalOps = allList.filter((p) => p.isOp).length;
   const totalAllowlisted = allList.filter((p) => p.isAllowlisted).length;
+  const totalBanned = bannedList.length;
 
   // Filter based on active filter and search query
   const applyFilter = (list) => {
@@ -217,21 +323,24 @@ export const Players = () => {
       const matchesSearch =
         !searchQuery ||
         p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        (p.xuid && p.xuid.includes(searchQuery));
+        (p.xuid && p.xuid.includes(searchQuery)) ||
+        (p.banReason && p.banReason.toLowerCase().includes(searchQuery.toLowerCase()));
 
       if (!matchesSearch) return false;
 
       if (activeFilter === 'online') return p.isOnline;
-      if (activeFilter === 'offline') return !p.isOnline;
+      if (activeFilter === 'offline') return !p.isOnline && !p.isBanned;
       if (activeFilter === 'ops') return p.isOp;
       if (activeFilter === 'allowlist') return p.isAllowlisted;
+      if (activeFilter === 'banned') return p.isBanned;
 
       return true;
     });
   };
 
   const filteredOnline = applyFilter(onlineList);
-  const filteredOffline = applyFilter(offlineList);
+  const filteredOffline = applyFilter(offlineList.filter((p) => !p.isBanned));
+  const filteredBanned = applyFilter(bannedList);
   const filteredAll = applyFilter(allList);
 
   return (
@@ -254,7 +363,7 @@ export const Players = () => {
         <div>
           <h1 className="page-title">Players & Operators</h1>
           <p className="page-subtitle">
-            Real-time telemetry of live Bedrock players, permission tiers (OP, Member, Visitor), and BDS Allowlist synchronization.
+            Real-time telemetry of live Bedrock players, permission tiers (OP, Member, Visitor), instant healing, instant food, kicking, and ban management.
           </p>
         </div>
         <div className="header-meta-actions">
@@ -323,6 +432,19 @@ export const Players = () => {
         </div>
 
         <div
+          className={`player-stat-card card-banned ${activeFilter === 'banned' ? 'border-red' : ''}`}
+          onClick={() => setActiveFilter(activeFilter === 'banned' ? 'all' : 'banned')}
+          style={{ cursor: 'pointer' }}
+        >
+          <div className="stat-icon-wrapper">🚫</div>
+          <div className="stat-content">
+            <span className="stat-label">Banned Players</span>
+            <span className="stat-number">{totalBanned}</span>
+            <span className="stat-sub">Blocked from connecting</span>
+          </div>
+        </div>
+
+        <div
           className={`player-stat-card card-total ${activeFilter === 'all' ? 'border-primary' : ''}`}
           onClick={() => setActiveFilter('all')}
           style={{ cursor: 'pointer' }}
@@ -342,7 +464,7 @@ export const Players = () => {
           <span className="search-icon">🔍</span>
           <input
             type="text"
-            placeholder="Search players by Xbox Gamertag or XUID..."
+            placeholder="Search players by Xbox Gamertag, XUID, or Ban reason..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
           />
@@ -384,10 +506,17 @@ export const Players = () => {
         </button>
         <button
           type="button"
+          className={`player-filter-tab ${activeFilter === 'banned' ? 'active' : ''}`}
+          onClick={() => setActiveFilter('banned')}
+        >
+          <span>🚫</span> Banned ({totalBanned})
+        </button>
+        <button
+          type="button"
           className={`player-filter-tab ${activeFilter === 'offline' ? 'active' : ''}`}
           onClick={() => setActiveFilter('offline')}
         >
-          <span>⚪</span> Offline Roster ({offlineList.length})
+          <span>⚪</span> Offline Roster ({filteredOffline.length})
         </button>
       </div>
 
@@ -495,6 +624,24 @@ export const Players = () => {
                             <>
                               <button
                                 type="button"
+                                className="btn-action-small btn-heal"
+                                disabled={actionLoading === `${player.name}-heal`}
+                                onClick={() => handleHealPlayer(player)}
+                                title="Instantly heal player to full 20 HP health"
+                              >
+                                {actionLoading === `${player.name}-heal` ? '...' : '💖 Heal'}
+                              </button>
+                              <button
+                                type="button"
+                                className="btn-action-small btn-feed"
+                                disabled={actionLoading === `${player.name}-feed`}
+                                onClick={() => handleFeedPlayer(player)}
+                                title="Instantly fill hunger and saturation meters to full"
+                              >
+                                {actionLoading === `${player.name}-feed` ? '...' : '🍖 Feed'}
+                              </button>
+                              <button
+                                type="button"
                                 className={`btn-action-small ${player.isOp ? 'btn-deop' : 'btn-op'}`}
                                 disabled={actionLoading === player.name}
                                 onClick={() => handleToggleOp(player)}
@@ -515,10 +662,25 @@ export const Players = () => {
                                 type="button"
                                 className="btn-action-small btn-kick"
                                 disabled={actionLoading === player.name}
-                                onClick={() => setKickModalPlayer(player)}
+                                onClick={() => {
+                                  setKickModalPlayer(player);
+                                  setKickReason('Kicked by administrator');
+                                }}
                                 title="Kick player from server"
                               >
                                 👢 Kick
+                              </button>
+                              <button
+                                type="button"
+                                className="btn-action-small btn-ban"
+                                disabled={actionLoading === player.name}
+                                onClick={() => {
+                                  setBanModalPlayer(player);
+                                  setBanReason('Banned by administrator');
+                                }}
+                                title="Ban player from server (ejects and blocks reconnection)"
+                              >
+                                🚫 Ban
                               </button>
                             </>
                           )}
@@ -533,22 +695,133 @@ export const Players = () => {
         </div>
       )}
 
-      {/* SECTION 2: ROSTER / OFFLINE PLAYERS (Shown when filter is not 'online') */}
-      {activeFilter !== 'online' && (
+      {/* SECTION 2: BANNED PLAYERS (Shown when filter is 'banned' or 'all' with banned players) */}
+      {(activeFilter === 'banned' || (activeFilter === 'all' && filteredBanned.length > 0)) && (
+        <div className="card player-section-card mb-6" style={{ borderLeft: '4px solid #ef4444' }}>
+          <div className="card-header-styled">
+            <div className="header-badge-title">
+              <span className="offline-indicator" style={{ background: '#ef4444' }}></span>
+              <h2 style={{ color: '#fca5a5' }}>
+                Banned Players ({filteredBanned.length})
+              </h2>
+            </div>
+            <span className="header-meta">
+              Blocked from joining • Automatically kicked upon connection attempt
+            </span>
+          </div>
+
+          {filteredBanned.length === 0 ? (
+            <div className="empty-players-state">
+              <div className="empty-icon">🛡️</div>
+              <h3>No Banned Players</h3>
+              <p>No players are currently banned from the server.</p>
+            </div>
+          ) : (
+            <div className="table-responsive">
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>Banned Player</th>
+                    <th>Ban Reason</th>
+                    <th>Banned Date</th>
+                    <th>Banned By</th>
+                    <th>XUID</th>
+                    <th style={{ textAlign: 'right' }}>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredBanned.map((player) => (
+                    <tr key={player.name} className="player-row-offline">
+                      <td>
+                        <div className="player-name-cell">
+                          <div className="player-avatar" style={{ background: 'rgba(239, 68, 68, 0.2)', border: '1px solid rgba(239, 68, 68, 0.5)' }}>
+                            <span style={{ color: '#fca5a5' }}>{player.name.charAt(0).toUpperCase()}</span>
+                          </div>
+                          <div className="player-name-meta">
+                            <span
+                              className="player-gamertag font-bold text-white"
+                              style={{ cursor: 'pointer' }}
+                              title="Click to copy Gamertag"
+                              onClick={() => copyToClipboard(player.name, 'Gamertag')}
+                            >
+                              {player.name}
+                            </span>
+                            <span className="banned-pill">BANNED</span>
+                          </div>
+                        </div>
+                      </td>
+                      <td>
+                        <span className="text-sm font-semibold text-danger">
+                          {player.banReason || 'Banned by administrator'}
+                        </span>
+                      </td>
+                      <td>
+                        <span className="time-sub">{formatDate(player.bannedAt || player.lastSeen)}</span>
+                      </td>
+                      <td>
+                        <span className="badge badge-subtle">{player.bannedBy || 'admin'}</span>
+                      </td>
+                      <td>
+                        <span
+                          className="xuid-code"
+                          style={{ cursor: player.xuid ? 'pointer' : 'default' }}
+                          title={player.xuid ? 'Click to copy XUID' : ''}
+                          onClick={() => player.xuid && copyToClipboard(player.xuid, 'XUID')}
+                        >
+                          {player.xuid || 'None recorded'}
+                        </span>
+                      </td>
+                      <td style={{ textAlign: 'right' }}>
+                        <div className="table-actions-row">
+                          {isAdmin && (
+                            <>
+                              <button
+                                type="button"
+                                className="btn-action-small btn-unban"
+                                disabled={actionLoading === player.name}
+                                onClick={() => handleUnbanPlayer(player)}
+                                title="Unban player and allow them to join"
+                              >
+                                🔓 Unban Player
+                              </button>
+                              <button
+                                type="button"
+                                className="btn-action-small btn-delete"
+                                disabled={actionLoading === player.name}
+                                onClick={() => handleDeletePlayer(player)}
+                                title="Delete record from database"
+                              >
+                                🗑️ Delete
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* SECTION 3: ROSTER / OFFLINE PLAYERS (Shown when filter is not 'online' and not 'banned') */}
+      {activeFilter !== 'online' && activeFilter !== 'banned' && (
         <div className="card player-section-card">
           <div className="card-header-styled">
             <div className="header-badge-title">
               <span className="offline-indicator"></span>
               <h2>
                 {activeFilter === 'ops'
-                  ? `Server Operators (${filteredAll.length})`
+                  ? `Server Operators (${filteredAll.filter((p) => p.isOp).length})`
                   : activeFilter === 'allowlist'
-                  ? `Allowlisted Players (${filteredAll.length})`
-                  : `Server Directory & Historical Roster (${filteredOffline.length})`}
+                  ? `Allowlisted Players (${filteredAll.filter((p) => p.isAllowlisted).length})`
+                  : `Server Directory & Offline Roster (${filteredOffline.length})`}
               </h2>
             </div>
             <span className="header-meta">
-              Synchronized with permissions.json & allowlist.json
+              Synchronized with permissions.json, allowlist.json & banned-players.json
             </span>
           </div>
 
@@ -596,8 +869,8 @@ export const Players = () => {
                             >
                               {player.name}
                             </span>
-                            <span className={`player-status-badge ${player.isOnline ? 'online-pill' : 'offline-pill'}`}>
-                              {player.isOnline ? 'ONLINE' : 'OFFLINE'}
+                            <span className={`player-status-badge ${player.isBanned ? 'banned-pill' : (player.isOnline ? 'online-pill' : 'offline-pill')}`}>
+                              {player.isBanned ? 'BANNED' : (player.isOnline ? 'ONLINE' : 'OFFLINE')}
                             </span>
                           </div>
                         </div>
@@ -649,24 +922,50 @@ export const Players = () => {
                         <div className="table-actions-row">
                           {isAdmin && (
                             <>
-                              <button
-                                type="button"
-                                className={`btn-action-small ${player.isOp ? 'btn-deop' : 'btn-op'}`}
-                                disabled={actionLoading === player.name}
-                                onClick={() => handleToggleOp(player)}
-                                title={player.isOp ? 'Revoke Operator privileges' : 'Grant Operator privileges'}
-                              >
-                                {player.isOp ? 'De-OP' : '👑 Make OP'}
-                              </button>
-                              <button
-                                type="button"
-                                className={`btn-action-small ${player.isAllowlisted ? 'btn-allowlist-remove' : 'btn-allowlist'}`}
-                                disabled={actionLoading === player.name}
-                                onClick={() => handleToggleAllowlist(player)}
-                                title={player.isAllowlisted ? 'Remove from allowlist' : 'Add to allowlist'}
-                              >
-                                {player.isAllowlisted ? '✕ Unallow' : '✓ Allow'}
-                              </button>
+                              {player.isBanned ? (
+                                <button
+                                  type="button"
+                                  className="btn-action-small btn-unban"
+                                  disabled={actionLoading === player.name}
+                                  onClick={() => handleUnbanPlayer(player)}
+                                  title="Unban player"
+                                >
+                                  🔓 Unban
+                                </button>
+                              ) : (
+                                <>
+                                  <button
+                                    type="button"
+                                    className={`btn-action-small ${player.isOp ? 'btn-deop' : 'btn-op'}`}
+                                    disabled={actionLoading === player.name}
+                                    onClick={() => handleToggleOp(player)}
+                                    title={player.isOp ? 'Revoke Operator privileges' : 'Grant Operator privileges'}
+                                  >
+                                    {player.isOp ? 'De-OP' : '👑 Make OP'}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className={`btn-action-small ${player.isAllowlisted ? 'btn-allowlist-remove' : 'btn-allowlist'}`}
+                                    disabled={actionLoading === player.name}
+                                    onClick={() => handleToggleAllowlist(player)}
+                                    title={player.isAllowlisted ? 'Remove from allowlist' : 'Add to allowlist'}
+                                  >
+                                    {player.isAllowlisted ? '✕ Unallow' : '✓ Allow'}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="btn-action-small btn-ban"
+                                    disabled={actionLoading === player.name}
+                                    onClick={() => {
+                                      setBanModalPlayer(player);
+                                      setBanReason('Banned by administrator');
+                                    }}
+                                    title="Ban player from server"
+                                  >
+                                    🚫 Ban
+                                  </button>
+                                </>
+                              )}
                               <button
                                 type="button"
                                 className="btn-action-small btn-delete"
@@ -736,6 +1035,7 @@ export const Players = () => {
                     className="form-input"
                     value={newPermission}
                     onChange={(e) => setNewPermission(e.target.value)}
+                    disabled={newIsBanned}
                   >
                     <option value="member">🛡️ Member (Standard survival gameplay)</option>
                     <option value="operator">👑 Operator (Full admin commands / cheats / teleport)</option>
@@ -743,15 +1043,32 @@ export const Players = () => {
                   </select>
                 </div>
 
-                <div className="form-group mb-2">
+                <div className="form-group mb-3">
                   <label className="d-flex items-center gap-2 cursor-pointer">
                     <input
                       type="checkbox"
                       checked={newIsAllowlisted}
+                      disabled={newIsBanned}
                       onChange={(e) => setNewIsAllowlisted(e.target.checked)}
                     />
                     <span className="text-sm text-white">
                       🛡️ Add directly to Bedrock <code>allowlist.json</code>
+                    </span>
+                  </label>
+                </div>
+
+                <div className="form-group mb-2">
+                  <label className="d-flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={newIsBanned}
+                      onChange={(e) => {
+                        setNewIsBanned(e.target.checked);
+                        if (e.target.checked) setNewIsAllowlisted(false);
+                      }}
+                    />
+                    <span className="text-sm text-danger font-semibold">
+                      🚫 Pre-ban this gamertag immediately (block connection attempts)
                     </span>
                   </label>
                 </div>
@@ -791,7 +1108,7 @@ export const Players = () => {
                 <p className="text-sub mb-3 text-sm">
                   Are you sure you want to kick <strong>{kickModalPlayer.name}</strong> from the server?
                 </p>
-                <div className="form-group">
+                <div className="form-group mb-3">
                   <label className="form-label">Kick Reason (Shown to player on disconnect screen)</label>
                   <input
                     type="text"
@@ -800,6 +1117,18 @@ export const Players = () => {
                     value={kickReason}
                     onChange={(e) => setKickReason(e.target.value)}
                   />
+                  <div className="reason-chips-row">
+                    {KICK_REASON_PRESETS.map((chip) => (
+                      <button
+                        key={chip}
+                        type="button"
+                        className={`reason-chip ${kickReason === chip ? 'active' : ''}`}
+                        onClick={() => setKickReason(chip)}
+                      >
+                        {chip}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               </div>
               <div className="modal-footer">
@@ -816,6 +1145,68 @@ export const Players = () => {
                   disabled={actionLoading === kickModalPlayer.name}
                 >
                   {actionLoading === kickModalPlayer.name ? 'Kicking...' : 'Confirm Kick'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: BAN PLAYER */}
+      {banModalPlayer && (
+        <div className="modal-overlay" onClick={() => setBanModalPlayer(null)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
+            <div className="modal-header">
+              <h3 className="modal-title" style={{ color: '#f87171' }}>🚫 Ban Player</h3>
+              <button className="modal-close-btn" onClick={() => setBanModalPlayer(null)}>✕</button>
+            </div>
+            <form onSubmit={handleBanConfirm}>
+              <div className="modal-body">
+                <div className="alert-toast alert-error mb-4" style={{ borderRadius: 'var(--radius-md)' }}>
+                  <span className="toast-icon">⚠️</span>
+                  <span className="toast-text text-xs">
+                    Banning <strong>{banModalPlayer.name}</strong> will immediately eject them if online, remove them from the allowlist, and automatically kick them upon any future connection attempt.
+                  </span>
+                </div>
+
+                <div className="form-group mb-3">
+                  <label className="form-label">Ban Reason (Recorded in audit log & shown on disconnect)</label>
+                  <input
+                    type="text"
+                    required
+                    className="form-input"
+                    value={banReason}
+                    onChange={(e) => setBanReason(e.target.value)}
+                  />
+                  <div className="reason-chips-row">
+                    {BAN_REASON_PRESETS.map((chip) => (
+                      <button
+                        key={chip}
+                        type="button"
+                        className={`reason-chip ${banReason === chip ? 'active' : ''}`}
+                        onClick={() => setBanReason(chip)}
+                      >
+                        {chip}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+              <div className="modal-footer">
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => setBanModalPlayer(null)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="btn btn-danger"
+                  style={{ background: '#dc2626' }}
+                  disabled={actionLoading === banModalPlayer.name}
+                >
+                  {actionLoading === banModalPlayer.name ? 'Banning...' : 'Confirm & Ban Player'}
                 </button>
               </div>
             </form>

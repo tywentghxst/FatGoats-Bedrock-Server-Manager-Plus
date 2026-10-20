@@ -216,10 +216,20 @@ const db = {
         permission TEXT DEFAULT 'member',
         is_op INTEGER DEFAULT 0,
         is_online INTEGER DEFAULT 0,
+        is_banned INTEGER DEFAULT 0,
+        ban_reason TEXT DEFAULT '',
+        banned_at TEXT DEFAULT NULL,
+        banned_by TEXT DEFAULT '',
         first_seen TEXT DEFAULT (datetime('now')),
         last_seen TEXT DEFAULT (datetime('now'))
       )
     `);
+
+    // Safe column migrations for players table
+    try { _sqlDb.exec('ALTER TABLE players ADD COLUMN is_banned INTEGER DEFAULT 0'); } catch (_) {}
+    try { _sqlDb.exec("ALTER TABLE players ADD COLUMN ban_reason TEXT DEFAULT ''"); } catch (_) {}
+    try { _sqlDb.exec("ALTER TABLE players ADD COLUMN banned_at TEXT DEFAULT NULL"); } catch (_) {}
+    try { _sqlDb.exec("ALTER TABLE players ADD COLUMN banned_by TEXT DEFAULT ''"); } catch (_) {}
 
     // ----- Seed default admin account -----
     const adminCheck = this.prepare('SELECT id FROM users WHERE username = ?').get('admin');

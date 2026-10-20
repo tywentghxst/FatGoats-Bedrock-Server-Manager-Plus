@@ -64,6 +64,21 @@ class ServerProcess extends EventEmitter {
     if (connectMatch) {
       const playerName = connectMatch[1].trim();
       const xuid = connectMatch[2] ? connectMatch[2].trim() : null;
+
+      // Check if player is banned; if so, kick immediately
+      try {
+        const playerService = require('./playerService');
+        const banCheck = playerService.isPlayerBanned(playerName, xuid);
+        if (banCheck && banCheck.isBanned) {
+          const reason = (banCheck.reason || 'You are banned from this server.').replace(/["\n\r]/g, '');
+          console.warn(`[ServerProcess] Banned player "${playerName}" attempted to join. Kicking immediately: ${reason}`);
+          this.sendCommand(`kick "${playerName}" "${reason}"`);
+          return;
+        }
+      } catch (banErr) {
+        console.warn('[ServerProcess] Ban check error during connect:', banErr.message);
+      }
+
       this.connectedPlayers.add(playerName);
       this.playerCount = this.connectedPlayers.size;
       this.emit('player_join', { name: playerName, xuid });

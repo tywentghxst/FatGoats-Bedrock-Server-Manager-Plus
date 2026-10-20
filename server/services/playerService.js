@@ -5,6 +5,80 @@ const db = require('../database');
 
 const PERMISSIONS_FILE = path.join(config.BDS_DIR, 'permissions.json');
 const ALLOWLIST_FILE = path.join(config.BDS_DIR, 'allowlist.json');
+const BANNED_PLAYERS_FILE = path.join(config.BDS_DIR, 'banned-players.json');
+
+/**
+ * Read BDS banned-players.json safely
+ */
+function readBannedPlayersFile() {
+  try {
+    if (fs.existsSync(BANNED_PLAYERS_FILE)) {
+      const raw = fs.readFileSync(BANNED_PLAYERS_FILE, 'utf8');
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed;
+    }
+  } catch (err) {
+    console.warn('[PlayerService] Failed reading banned-players.json:', err.message);
+  }
+  return [];
+}
+
+/**
+ * Write BDS banned-players.json safely
+ */
+function writeBannedPlayersFile(bannedList) {
+  try {
+    fs.writeFileSync(BANNED_PLAYERS_FILE, JSON.stringify(bannedList, null, 2), 'utf8');
+  } catch (err) {
+    console.error('[PlayerService] Failed writing banned-players.json:', err.message);
+  }
+}
+
+/**
+ * Check if a player name or xuid is banned
+ */
+function isPlayerBanned(name, xuid = null) {
+  const cleanName = (name || '').trim().toLowerCase();
+  const cleanXuid = xuid ? String(xuid).trim() : null;
+
+  // 1. Check SQLite
+  try {
+    let row = null;
+    if (cleanXuid) {
+      row = db.prepare('SELECT is_banned, ban_reason, banned_at, banned_by FROM players WHERE xuid = ?').get(cleanXuid);
+    }
+    if (!row && cleanName) {
+      row = db.prepare('SELECT is_banned, ban_reason, banned_at, banned_by FROM players WHERE lower(name) = lower(?)').get(cleanName);
+    }
+    if (row && Boolean(row.is_banned)) {
+      return {
+        isBanned: true,
+        reason: row.ban_reason || 'Banned by administrator',
+        bannedAt: row.banned_at || null,
+        bannedBy: row.banned_by || 'admin'
+      };
+    }
+  } catch (_) {}
+
+  // 2. Check banned-players.json
+  const fileBans = readBannedPlayersFile();
+  const found = fileBans.find((b) => {
+    if (cleanXuid && b.xuid && String(b.xuid) === cleanXuid) return true;
+    if (cleanName && b.name && b.name.toLowerCase() === cleanName) return true;
+    return false;
+  });
+
+  if (found) {
+    return {
+      isBanned: true,
+      reason: found.reason || 'Banned by administrator',
+      bannedAt: found.bannedAt || null,
+      bannedBy: found.bannedBy || 'admin'
+    };
+  }
+
+  return { isBanned: false, reason: '', bannedAt: null, bannedBy: '' };
+}
 
 /**
  * Read BDS permissions.json safely
@@ -234,6 +308,7 @@ function getPlayers(activeServerProcess = null) {
   try {
     const perms = readPermissionsFile();
     const allowlist = readAllowlistFile();
+    const bannedFromFile = readBannedPlayersFile();
     let all = db.prepare('SELECT * FROM players ORDER BY is_online DESC, last_seen DESC').all();
 
     // Auto-discover and persist players from permissions.json not yet in SQLite
@@ -277,6 +352,24 @@ function getPlayers(activeServerProcess = null) {
       }
     }
 
+    // Auto-discover and persist players from banned-players.json not yet in SQLite
+    for (const b of bannedFromFile) {
+      const bName = b.name ? b.name.trim() : null;
+      if (!bName) continue;
+      const foundInDb = all.find((row) => row.name.toLowerCase() === bName.toLowerCase());
+      if (!foundInDb) {
+        try {
+          const now = new Date().toISOString();
+          db.prepare(`
+            INSERT INTO players (name, xuid, permission, is_op, is_online, is_banned, ban_reason, banned_at, banned_by, first_seen, last_seen)
+            VALUES (?, ?, 'member', 0, 0, 1, ?, ?, ?, ?, ?)
+          `).run(bName, b.xuid || null, b.reason || 'Banned by administrator', b.bannedAt || now, b.bannedBy || 'admin', now, now);
+        } catch (insErr) {
+          console.warn('[PlayerService] Note inserting discovered banned player:', insErr.message);
+        }
+      }
+    }
+
     // Refresh all players after sync
     all = db.prepare('SELECT * FROM players ORDER BY is_online DESC, last_seen DESC').all();
 
@@ -295,7 +388,9 @@ function getPlayers(activeServerProcess = null) {
     const offline = [];
 
     for (const player of all) {
-      const isConnected = activeServerProcess ? (isServerRunning && connectedSet.has(player.name)) : Boolean(player.is_online);
+      const banInfo = isPlayerBanned(player.name, player.xuid);
+      const isBanned = Boolean(player.is_banned || banInfo.isBanned);
+      const isConnected = isBanned ? false : (activeServerProcess ? (isServerRunning && connectedSet.has(player.name)) : Boolean(player.is_online));
       const permInFile = getPermissionFromFile(player.name, player.xuid, perms);
       const isOp = Boolean(player.is_op || isOperatorInFile(player.name, player.xuid, perms));
       const permission = isOp ? 'operator' : (permInFile || player.permission || 'member');
@@ -308,6 +403,10 @@ function getPlayers(activeServerProcess = null) {
         isOp,
         permission,
         isAllowlisted,
+        isBanned,
+        banReason: isBanned ? (player.ban_reason || banInfo.reason || 'Banned by administrator') : '',
+        bannedAt: isBanned ? (player.banned_at || banInfo.bannedAt || null) : null,
+        bannedBy: isBanned ? (player.banned_by || banInfo.bannedBy || 'admin') : '',
         isOnline: isConnected,
         firstSeen: player.first_seen,
         lastSeen: player.last_seen
@@ -322,6 +421,9 @@ function getPlayers(activeServerProcess = null) {
 
     // If serverProcess has players not yet recorded in DB, add them to online
     for (const name of connectedSet) {
+      const banInfo = isPlayerBanned(name);
+      if (banInfo.isBanned) continue;
+
       if (!online.some((p) => p.name.toLowerCase() === name.toLowerCase())) {
         const isOp = isOperatorInFile(name, null, perms);
         const permInFile = getPermissionFromFile(name, null, perms);
@@ -333,6 +435,10 @@ function getPlayers(activeServerProcess = null) {
           isOp,
           permission: isOp ? 'operator' : (permInFile || 'member'),
           isAllowlisted,
+          isBanned: false,
+          banReason: '',
+          bannedAt: null,
+          bannedBy: '',
           isOnline: true,
           firstSeen: new Date().toISOString(),
           lastSeen: new Date().toISOString()
@@ -340,17 +446,22 @@ function getPlayers(activeServerProcess = null) {
       }
     }
 
-    const totalCount = online.length + offline.length;
-    const opCount = [...online, ...offline].filter((p) => p.isOp).length;
-    const allowlistCount = [...online, ...offline].filter((p) => p.isAllowlisted).length;
+    const allPlayersCombined = [...online, ...offline];
+    const totalCount = allPlayersCombined.length;
+    const opCount = allPlayersCombined.filter((p) => p.isOp).length;
+    const allowlistCount = allPlayersCombined.filter((p) => p.isAllowlisted).length;
+    const banned = allPlayersCombined.filter((p) => p.isBanned);
+    const bannedCount = banned.length;
 
     return {
       online,
       offline,
+      banned,
       totalCount,
       onlineCount: online.length,
       opCount,
-      allowlistCount
+      allowlistCount,
+      bannedCount
     };
   } catch (err) {
     console.error('[PlayerService] Error getting players:', err.message);
@@ -588,6 +699,13 @@ function kickPlayer(name, reason = 'Kicked by administrator', serverProcess = nu
   const cleanReason = (reason || 'Kicked by administrator').replace(/["\n\r]/g, '');
   serverProcess.sendCommand(`kick "${cleanName}" "${cleanReason}"`);
 
+  // Remove from live connected players set immediately
+  if (serverProcess.connectedPlayers && serverProcess.connectedPlayers.has(cleanName)) {
+    serverProcess.connectedPlayers.delete(cleanName);
+    serverProcess.playerCount = serverProcess.connectedPlayers.size;
+    serverProcess.emit('player_leave', { name: cleanName, xuid: null });
+  }
+
   // Update DB status
   try {
     db.prepare('UPDATE players SET is_online = 0 WHERE lower(name) = lower(?)').run(cleanName);
@@ -597,6 +715,207 @@ function kickPlayer(name, reason = 'Kicked by administrator', serverProcess = nu
     success: true,
     name: cleanName,
     message: `Kicked ${cleanName} from server (${cleanReason})`
+  };
+}
+
+/**
+ * Ban a player from the server (both online and offline)
+ */
+async function banPlayer(name, reason = 'Banned by administrator', bannedBy = 'admin', serverProcess = null) {
+  if (!name || typeof name !== 'string' || !name.trim()) {
+    throw new Error('Valid player name is required.');
+  }
+
+  const cleanName = name.trim();
+  const cleanReason = (reason || 'Banned by administrator').trim();
+  const now = new Date().toISOString();
+
+  let playerXuid = null;
+  let existing = null;
+  try {
+    existing = db.prepare('SELECT * FROM players WHERE lower(name) = lower(?)').get(cleanName);
+    if (existing && existing.xuid) playerXuid = String(existing.xuid).trim();
+  } catch (_) {}
+
+  // 1. If server is running, kick them immediately with the ban reason
+  if (serverProcess && serverProcess.state === 'running') {
+    try {
+      const kickReason = `Banned: ${cleanReason}`.replace(/["\n\r]/g, '');
+      serverProcess.sendCommand(`kick "${cleanName}" "${kickReason}"`);
+      if (serverProcess.connectedPlayers && serverProcess.connectedPlayers.has(cleanName)) {
+        serverProcess.connectedPlayers.delete(cleanName);
+        serverProcess.playerCount = serverProcess.connectedPlayers.size;
+        serverProcess.emit('player_leave', { name: cleanName, xuid: playerXuid });
+      }
+    } catch (cmdErr) {
+      console.warn('[PlayerService] Error sending kick on ban:', cmdErr.message);
+    }
+  }
+
+  // 2. Persist ban in SQLite
+  try {
+    if (existing) {
+      db.prepare(`
+        UPDATE players 
+        SET is_banned = 1,
+            ban_reason = ?,
+            banned_at = ?,
+            banned_by = ?,
+            is_online = 0
+        WHERE id = ?
+      `).run(cleanReason, now, bannedBy || 'admin', existing.id);
+    } else {
+      db.prepare(`
+        INSERT INTO players (name, xuid, permission, is_op, is_online, is_banned, ban_reason, banned_at, banned_by, first_seen, last_seen)
+        VALUES (?, ?, 'member', 0, 0, 1, ?, ?, ?, ?, ?)
+      `).run(cleanName, playerXuid, cleanReason, now, bannedBy || 'admin', now, now);
+    }
+  } catch (dbErr) {
+    console.error('[PlayerService] Database error banning player:', dbErr.message);
+  }
+
+  // 3. Persist to banned-players.json
+  const fileBans = readBannedPlayersFile();
+  const existingIdx = fileBans.findIndex(
+    (b) => (playerXuid && b.xuid && String(b.xuid) === playerXuid) ||
+           (b.name && b.name.toLowerCase() === cleanName.toLowerCase())
+  );
+
+  const banEntry = {
+    name: cleanName,
+    xuid: playerXuid,
+    reason: cleanReason,
+    bannedAt: now,
+    bannedBy: bannedBy || 'admin'
+  };
+
+  if (existingIdx >= 0) {
+    fileBans[existingIdx] = banEntry;
+  } else {
+    fileBans.push(banEntry);
+  }
+  writeBannedPlayersFile(fileBans);
+
+  // 4. Remove from allowlist if present
+  try {
+    const allowlist = readAllowlistFile();
+    const filtered = allowlist.filter((a) => !a.name || a.name.toLowerCase() !== cleanName.toLowerCase());
+    if (filtered.length !== allowlist.length) {
+      writeAllowlistFile(filtered);
+      if (serverProcess && serverProcess.state === 'running') {
+        serverProcess.sendCommand('allowlist reload');
+      }
+    }
+  } catch (_) {}
+
+  return {
+    success: true,
+    name: cleanName,
+    isBanned: true,
+    reason: cleanReason,
+    bannedAt: now,
+    message: `Banned player "${cleanName}" (${cleanReason})`
+  };
+}
+
+/**
+ * Unban a player
+ */
+async function unbanPlayer(name, serverProcess = null) {
+  if (!name || typeof name !== 'string' || !name.trim()) {
+    throw new Error('Valid player name is required.');
+  }
+
+  const cleanName = name.trim();
+
+  // 1. Update SQLite
+  try {
+    db.prepare(`
+      UPDATE players 
+      SET is_banned = 0,
+          ban_reason = '',
+          banned_at = NULL,
+          banned_by = ''
+      WHERE lower(name) = lower(?)
+    `).run(cleanName);
+  } catch (dbErr) {
+    console.error('[PlayerService] Database error unbanning player:', dbErr.message);
+  }
+
+  // 2. Remove from banned-players.json
+  try {
+    const fileBans = readBannedPlayersFile();
+    const filtered = fileBans.filter((b) => !b.name || b.name.toLowerCase() !== cleanName.toLowerCase());
+    if (filtered.length !== fileBans.length) {
+      writeBannedPlayersFile(filtered);
+    }
+  } catch (_) {}
+
+  return {
+    success: true,
+    name: cleanName,
+    isBanned: false,
+    message: `Unbanned player "${cleanName}"`
+  };
+}
+
+/**
+ * Instantly heal an online player to full health (Bedrock instant health)
+ */
+function healPlayer(name, serverProcess = null) {
+  if (!name || typeof name !== 'string' || !name.trim()) {
+    throw new Error('Valid player name is required.');
+  }
+  if (!serverProcess || serverProcess.state !== 'running') {
+    throw new Error('Bedrock server is not running. Cannot heal players.');
+  }
+
+  const cleanName = name.trim();
+  // Minecraft Bedrock: effect <player> heal [seconds] [amplifier] [hideParticles]
+  // In Bedrock, effect "heal" at amplifier 255 gives instant maximum hearts
+  serverProcess.sendCommand(`effect "${cleanName}" heal 1 255 true`);
+  serverProcess.sendCommand(`effect give "${cleanName}" heal 1 255 true`);
+
+  return {
+    success: true,
+    name: cleanName,
+    message: `Instantly healed ${cleanName} to maximum health!`
+  };
+}
+
+/**
+ * Instantly restore an online player's hunger and saturation to full
+ */
+function feedPlayer(name, serverProcess = null) {
+  if (!name || typeof name !== 'string' || !name.trim()) {
+    throw new Error('Valid player name is required.');
+  }
+  if (!serverProcess || serverProcess.state !== 'running') {
+    throw new Error('Bedrock server is not running. Cannot feed players.');
+  }
+
+  const cleanName = name.trim();
+  // Minecraft Bedrock: effect "saturation" restores food points and saturation immediately
+  serverProcess.sendCommand(`effect "${cleanName}" saturation 1 255 true`);
+  serverProcess.sendCommand(`effect give "${cleanName}" saturation 1 255 true`);
+
+  return {
+    success: true,
+    name: cleanName,
+    message: `Instantly restored ${cleanName}'s food & saturation to full!`
+  };
+}
+
+/**
+ * Instantly heal and feed a player together
+ */
+function healAndFeedPlayer(name, serverProcess = null) {
+  healPlayer(name, serverProcess);
+  feedPlayer(name, serverProcess);
+  return {
+    success: true,
+    name: name.trim(),
+    message: `Instantly healed and filled food bar for ${name.trim()}!`
   };
 }
 
@@ -682,6 +1001,12 @@ module.exports = {
   setPlayerPermission,
   setPlayerAllowlist,
   kickPlayer,
+  isPlayerBanned,
+  banPlayer,
+  unbanPlayer,
+  healPlayer,
+  feedPlayer,
+  healAndFeedPlayer,
   addPlayer,
   deletePlayer
 };

@@ -101,6 +101,106 @@ router.post('/kick', authenticate, requireAdmin, (req, res) => {
 });
 
 /**
+ * POST /ban
+ * (authenticate, requireAdmin) Ban a player (online or offline) and kick if online
+ */
+router.post('/ban', authenticate, requireAdmin, async (req, res) => {
+  try {
+    const { name, reason } = req.body;
+    if (!name) {
+      return res.status(400).json({ error: 'Player name is required' });
+    }
+
+    const result = await playerService.banPlayer(name, reason, req.user.username, serverProcess);
+    logAudit(req.user.id, req.user.username, 'BAN_PLAYER', { name, reason });
+    return res.json(result);
+  } catch (err) {
+    console.error('[PlayersRoute] Error banning player:', err);
+    return res.status(400).json({ error: err.message });
+  }
+});
+
+/**
+ * POST /unban
+ * (authenticate, requireAdmin) Unban a player
+ */
+router.post('/unban', authenticate, requireAdmin, async (req, res) => {
+  try {
+    const { name } = req.body;
+    if (!name) {
+      return res.status(400).json({ error: 'Player name is required' });
+    }
+
+    const result = await playerService.unbanPlayer(name, serverProcess);
+    logAudit(req.user.id, req.user.username, 'UNBAN_PLAYER', { name });
+    return res.json(result);
+  } catch (err) {
+    console.error('[PlayersRoute] Error unbanning player:', err);
+    return res.status(400).json({ error: err.message });
+  }
+});
+
+/**
+ * POST /heal
+ * (authenticate, requireAdmin) Instantly heal an online player to max health
+ */
+router.post('/heal', authenticate, requireAdmin, (req, res) => {
+  try {
+    const { name } = req.body;
+    if (!name) {
+      return res.status(400).json({ error: 'Player name is required' });
+    }
+
+    const result = playerService.healPlayer(name, serverProcess);
+    logAudit(req.user.id, req.user.username, 'HEAL_PLAYER', { name });
+    return res.json(result);
+  } catch (err) {
+    console.error('[PlayersRoute] Error healing player:', err);
+    return res.status(400).json({ error: err.message });
+  }
+});
+
+/**
+ * POST /feed
+ * (authenticate, requireAdmin) Instantly fill hunger and saturation meters to full
+ */
+router.post('/feed', authenticate, requireAdmin, (req, res) => {
+  try {
+    const { name } = req.body;
+    if (!name) {
+      return res.status(400).json({ error: 'Player name is required' });
+    }
+
+    const result = playerService.feedPlayer(name, serverProcess);
+    logAudit(req.user.id, req.user.username, 'FEED_PLAYER', { name });
+    return res.json(result);
+  } catch (err) {
+    console.error('[PlayersRoute] Error feeding player:', err);
+    return res.status(400).json({ error: err.message });
+  }
+});
+
+/**
+ * POST /heal-feed
+ * (authenticate, requireAdmin) Instantly heal and fill hunger together
+ */
+router.post('/heal-feed', authenticate, requireAdmin, (req, res) => {
+  try {
+    const { name } = req.body;
+    if (!name) {
+      return res.status(400).json({ error: 'Player name is required' });
+    }
+
+    const result = playerService.healAndFeedPlayer(name, serverProcess);
+    logAudit(req.user.id, req.user.username, 'HEAL_AND_FEED_PLAYER', { name });
+    return res.json(result);
+  } catch (err) {
+    console.error('[PlayersRoute] Error healing and feeding player:', err);
+    return res.status(400).json({ error: err.message });
+  }
+});
+
+/**
  * POST /add
  * (authenticate, requireAdmin) Pre-register an offline player
  */
